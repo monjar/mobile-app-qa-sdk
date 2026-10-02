@@ -1,0 +1,10 @@
+{
+  "reportId": "01JA2Z8Y6Q3K4M5N6P7R8S9T0V",
+  "ticket": "MOCH-42",
+  "number": 42,
+  "state": "pending",
+  "attachments": [
+    { "name": "screenshot", "state": "missing" },
+    { "name": "video", "state": "missing" }
+  ]
+}

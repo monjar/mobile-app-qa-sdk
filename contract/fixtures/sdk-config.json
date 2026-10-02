@@ -1,0 +1,34 @@
+{
+  "enabled": true,
+  "ttlSeconds": 3600,
+  "reportTypes": [
+    {
+      "id": "bug",
+      "label": "Bug"
+    },
+    {
+      "id": "idea",
+      "label": "Idea"
+    },
+    {
+      "id": "other",
+      "label": "Other"
+    }
+  ],
+  "screenshot": {
+    "enabled": true
+  },
+  "video": {
+    "enabled": true,
+    "maxSeconds": 30,
+    "captureMode": "snapshot",
+    "snapshotRenderer": "drawHierarchy",
+    "idleFps": 1,
+    "activeFps": 4,
+    "systemFps": 10,
+    "mainThreadBudgetPct": 3
+  },
+  "maskTextInputs": true,
+  "screenshotPrompt": true,
+  "message": null
+}
