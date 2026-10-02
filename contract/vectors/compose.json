@@ -1,0 +1,139 @@
+{
+ "description": "clipSchedule vectors: for each output frame, the index of the source frame shown.",
+ "cases": [
+  {
+   "name": "one frame per second at 10 fps output",
+   "frameTimes": [
+    0,
+    1000,
+    2000
+   ],
+   "start": 0,
+   "end": 3000,
+   "fps": 10,
+   "expect": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2
+   ]
+  },
+  {
+   "name": "window starting between frames uses the lead frame",
+   "frameTimes": [
+    0,
+    1000,
+    2000
+   ],
+   "start": 500,
+   "end": 2500,
+   "fps": 10,
+   "expect": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    2,
+    2
+   ]
+  },
+  {
+   "name": "start before the first frame shows the first frame",
+   "frameTimes": [
+    1000,
+    2000
+   ],
+   "start": 0,
+   "end": 2000,
+   "fps": 5,
+   "expect": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "name": "empty range",
+   "frameTimes": [
+    0
+   ],
+   "start": 1000,
+   "end": 1000,
+   "fps": 10,
+   "expect": []
+  },
+  {
+   "name": "irregular frames",
+   "frameTimes": [
+    0,
+    150,
+    300,
+    1000
+   ],
+   "start": 0,
+   "end": 1200,
+   "fps": 10,
+   "expect": [
+    0,
+    0,
+    1,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    3,
+    3
+   ]
+  }
+ ]
+}

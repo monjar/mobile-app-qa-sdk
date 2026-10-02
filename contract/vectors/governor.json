@@ -1,0 +1,170 @@
+{
+ "description": "nextCaptureDelayMs vectors; config is DEFAULT_GOVERNOR_CONFIG unless a case sets `config`. delayMs null means paused. The value is rounded to the nearest ms.",
+ "defaults": {
+  "idleFps": 1,
+  "activeFps": 4,
+  "budgetPct": 3,
+  "activeWindowMs": 1500
+ },
+ "cases": [
+  {
+   "name": "idle, cheap capture \u2192 idle rate",
+   "input": {
+    "now": 10000,
+    "lastTouchAt": null,
+    "avgCostMs": 5,
+    "lowPower": false,
+    "thermal": "nominal",
+    "paused": false
+   },
+   "delayMs": 1000
+  },
+  {
+   "name": "recent touch \u2192 active rate",
+   "input": {
+    "now": 10000,
+    "lastTouchAt": 9000,
+    "avgCostMs": 5,
+    "lowPower": false,
+    "thermal": "nominal",
+    "paused": false
+   },
+   "delayMs": 250
+  },
+  {
+   "name": "active but expensive capture \u2192 budget floor",
+   "input": {
+    "now": 10000,
+    "lastTouchAt": 9000,
+    "avgCostMs": 25,
+    "lowPower": false,
+    "thermal": "nominal",
+    "paused": false
+   },
+   "delayMs": 833
+  },
+  {
+   "name": "idle and very expensive \u2192 budget floor above idle rate",
+   "input": {
+    "now": 10000,
+    "lastTouchAt": null,
+    "avgCostMs": 40,
+    "lowPower": false,
+    "thermal": "nominal",
+    "paused": false
+   },
+   "delayMs": 1333
+  },
+  {
+   "name": "low power halves the idle rate",
+   "input": {
+    "now": 10000,
+    "lastTouchAt": null,
+    "avgCostMs": 5,
+    "lowPower": true,
+    "thermal": "nominal",
+    "paused": false
+   },
+   "delayMs": 2000
+  },
+  {
+   "name": "low power ignores recent touches",
+   "input": {
+    "now": 10000,
+    "lastTouchAt": 9900,
+    "avgCostMs": 5,
+    "lowPower": true,
+    "thermal": "nominal",
+    "paused": false
+   },
+   "delayMs": 2000
+  },
+  {
+   "name": "thermal fair still captures",
+   "input": {
+    "now": 10000,
+    "lastTouchAt": null,
+    "avgCostMs": 5,
+    "lowPower": false,
+    "thermal": "fair",
+    "paused": false
+   },
+   "delayMs": 1000
+  },
+  {
+   "name": "thermal serious pauses",
+   "input": {
+    "now": 10000,
+    "lastTouchAt": null,
+    "avgCostMs": 5,
+    "lowPower": false,
+    "thermal": "serious",
+    "paused": false
+   },
+   "delayMs": null
+  },
+  {
+   "name": "thermal critical pauses",
+   "input": {
+    "now": 10000,
+    "lastTouchAt": null,
+    "avgCostMs": 5,
+    "lowPower": false,
+    "thermal": "critical",
+    "paused": false
+   },
+   "delayMs": null
+  },
+  {
+   "name": "explicit pause",
+   "input": {
+    "now": 10000,
+    "lastTouchAt": null,
+    "avgCostMs": 5,
+    "lowPower": false,
+    "thermal": "nominal",
+    "paused": true
+   },
+   "delayMs": null
+  },
+  {
+   "name": "touch exactly at the window edge is active",
+   "input": {
+    "now": 10000,
+    "lastTouchAt": 8500,
+    "avgCostMs": 5,
+    "lowPower": false,
+    "thermal": "nominal",
+    "paused": false
+   },
+   "delayMs": 250
+  },
+  {
+   "name": "touch just past the window is idle",
+   "input": {
+    "now": 10000,
+    "lastTouchAt": 8499,
+    "avgCostMs": 5,
+    "lowPower": false,
+    "thermal": "nominal",
+    "paused": false
+   },
+   "delayMs": 1000
+  }
+ ],
+ "ewma": {
+  "description": "updateAverageCost applied in order, starting from null; compare with tolerance 1e-9",
+  "samples": [
+   10,
+   20,
+   20,
+   5
+  ],
+  "expect": [
+   10,
+   12,
+   13.6,
+   11.88
+  ]
+ }
+}

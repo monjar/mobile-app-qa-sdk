@@ -1,0 +1,233 @@
+{
+ "description": "Release type classifier vectors.",
+ "ios": [
+  {
+   "name": "simulator",
+   "signals": {
+    "isSimulator": true,
+    "profile": null,
+    "receipt": null,
+    "appTransactionEnvironment": null
+   },
+   "expect": "debug"
+  },
+  {
+   "name": "development profile (Xcode / expo run:ios on device)",
+   "signals": {
+    "isSimulator": false,
+    "profile": {
+     "getTaskAllow": true,
+     "provisionsAllDevices": false,
+     "provisionedDeviceCount": 3
+    },
+    "receipt": null,
+    "appTransactionEnvironment": null
+   },
+   "expect": "debug"
+  },
+  {
+   "name": "ad-hoc profile with devices (EAS preview)",
+   "signals": {
+    "isSimulator": false,
+    "profile": {
+     "getTaskAllow": false,
+     "provisionsAllDevices": false,
+     "provisionedDeviceCount": 12
+    },
+    "receipt": null,
+    "appTransactionEnvironment": null
+   },
+   "expect": "adhoc"
+  },
+  {
+   "name": "enterprise profile",
+   "signals": {
+    "isSimulator": false,
+    "profile": {
+     "getTaskAllow": false,
+     "provisionsAllDevices": true,
+     "provisionedDeviceCount": 0
+    },
+    "receipt": null,
+    "appTransactionEnvironment": null
+   },
+   "expect": "enterprise"
+  },
+  {
+   "name": "profile without devices or debugging is ambiguous",
+   "signals": {
+    "isSimulator": false,
+    "profile": {
+     "getTaskAllow": false,
+     "provisionsAllDevices": false,
+     "provisionedDeviceCount": 0
+    },
+    "receipt": null,
+    "appTransactionEnvironment": null
+   },
+   "expect": "unknown"
+  },
+  {
+   "name": "TestFlight: no profile, sandbox receipt",
+   "signals": {
+    "isSimulator": false,
+    "profile": null,
+    "receipt": "sandboxReceipt",
+    "appTransactionEnvironment": null
+   },
+   "expect": "testflight"
+  },
+  {
+   "name": "App Store: no profile, production receipt",
+   "signals": {
+    "isSimulator": false,
+    "profile": null,
+    "receipt": "receipt",
+    "appTransactionEnvironment": null
+   },
+   "expect": "appstore"
+  },
+  {
+   "name": "no receipt, AppTransaction sandbox",
+   "signals": {
+    "isSimulator": false,
+    "profile": null,
+    "receipt": null,
+    "appTransactionEnvironment": "sandbox"
+   },
+   "expect": "testflight"
+  },
+  {
+   "name": "no receipt, AppTransaction production",
+   "signals": {
+    "isSimulator": false,
+    "profile": null,
+    "receipt": null,
+    "appTransactionEnvironment": "production"
+   },
+   "expect": "appstore"
+  },
+  {
+   "name": "no receipt, AppTransaction xcode",
+   "signals": {
+    "isSimulator": false,
+    "profile": null,
+    "receipt": null,
+    "appTransactionEnvironment": "xcode"
+   },
+   "expect": "debug"
+  },
+  {
+   "name": "nothing known fails closed",
+   "signals": {
+    "isSimulator": false,
+    "profile": null,
+    "receipt": null,
+    "appTransactionEnvironment": null
+   },
+   "expect": "unknown"
+  },
+  {
+   "name": "receipt wins over AppTransaction",
+   "signals": {
+    "isSimulator": false,
+    "profile": null,
+    "receipt": "sandboxReceipt",
+    "appTransactionEnvironment": "production"
+   },
+   "expect": "testflight"
+  }
+ ],
+ "android": [
+  {
+   "name": "debuggable build",
+   "signals": {
+    "debuggable": true,
+    "installer": null,
+    "override": null
+   },
+   "expect": "debug"
+  },
+  {
+   "name": "debuggable even if installed from Play",
+   "signals": {
+    "debuggable": true,
+    "installer": "com.android.vending",
+    "override": null
+   },
+   "expect": "debug"
+  },
+  {
+   "name": "Google Play",
+   "signals": {
+    "debuggable": false,
+    "installer": "com.android.vending",
+    "override": null
+   },
+   "expect": "play"
+  },
+  {
+   "name": "Samsung Galaxy Store counts as a public store",
+   "signals": {
+    "debuggable": false,
+    "installer": "com.sec.android.app.samsungapps",
+    "override": null
+   },
+   "expect": "play"
+  },
+  {
+   "name": "sideloaded release (adb / apk)",
+   "signals": {
+    "debuggable": false,
+    "installer": null,
+    "override": null
+   },
+   "expect": "internal"
+  },
+  {
+   "name": "Firebase App Distribution",
+   "signals": {
+    "debuggable": false,
+    "installer": "dev.firebase.appdistribution",
+    "override": null
+   },
+   "expect": "internal"
+  },
+  {
+   "name": "override wins",
+   "signals": {
+    "debuggable": false,
+    "installer": "com.android.vending",
+    "override": "internal"
+   },
+   "expect": "internal"
+  },
+  {
+   "name": "override of debug on a release build",
+   "signals": {
+    "debuggable": false,
+    "installer": null,
+    "override": "debug"
+   },
+   "expect": "debug"
+  },
+  {
+   "name": "invalid override is ignored",
+   "signals": {
+    "debuggable": false,
+    "installer": "com.android.vending",
+    "override": "beta"
+   },
+   "expect": "play"
+  },
+  {
+   "name": "blank override is ignored",
+   "signals": {
+    "debuggable": false,
+    "installer": null,
+    "override": "  "
+   },
+   "expect": "internal"
+  }
+ ]
+}
