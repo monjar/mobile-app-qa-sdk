@@ -1,0 +1,18 @@
+{
+  "name": "snitch-monorepo",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Snitch \u2014 self-hosted QA and bug reporting for mobile apps.",
+  "license": "MIT",
+  "workspaces": [
+    "contract"
+  ],
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "build": "npm run build -w dashboard && npm run build -w server"
+  }
+}
