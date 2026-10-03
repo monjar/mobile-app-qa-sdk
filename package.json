@@ -5,7 +5,8 @@
   "description": "Snitch \u2014 self-hosted QA and bug reporting for mobile apps.",
   "license": "MIT",
   "workspaces": [
-    "contract"
+    "contract",
+    "server"
   ],
   "engines": {
     "node": ">=22.13"
