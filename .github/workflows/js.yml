@@ -1,0 +1,40 @@
+name: js
+
+# Contract, server and dashboard: typecheck, unit/integration tests, and the
+# Playwright end-to-end suite against the real server bundle.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: js-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - name: Build server and dashboard
+        run: npm run build
+      - name: End-to-end (real Chrome, so H.264 playback is checked too)
+        working-directory: dashboard
+        env:
+          PW_CHANNEL: chrome
+          CI: "1"
+        run: npx playwright test
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: dashboard/playwright-report
+          if-no-files-found: ignore

@@ -1,0 +1,114 @@
+name: docker
+
+# Builds the server image natively on amd64 and arm64 runners, smoke-tests each
+# (start, seed via the CLI, send a report with the fake SDK), and on tags or
+# master pushes publishes a multi-arch image to GHCR.
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/snitch-server
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: server/Dockerfile
+          load: true
+          tags: snitch-server:ci
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+      - name: Smoke test
+        run: |
+          docker volume create snitch-ci
+          docker run --rm -v snitch-ci:/data snitch-server:ci snitch project:create --name CI --slug ci --prefix CI --ingest-key snitch_pk_0123456789ABCDEFGHJKMNPQRS
+          docker run --rm -v snitch-ci:/data snitch-server:ci snitch user:create --email ci@snitch.local --password ci-password-123
+          docker run -d --name snitch -p 8080:8080 -v snitch-ci:/data -e SNITCH_PUBLIC_URL=http://127.0.0.1:8080 snitch-server:ci
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8080/health && break; sleep 1; done
+          sudo apt-get install -y ffmpeg >/dev/null
+          node scripts/fake-sdk.mjs --server http://127.0.0.1:8080 --key snitch_pk_0123456789ABCDEFGHJKMNPQRS --description "docker smoke" --generate-media 3
+          node scripts/ci-await-report.mjs --server http://127.0.0.1:8080 --description "docker smoke" --out smoke --timeout 30
+          bash scripts/verify-video.sh smoke/video.mp4
+          curl -fsS http://127.0.0.1:8080/health/ready
+          curl -fsS http://127.0.0.1:8080/ | grep -q '<div id="root">'
+          docker logs snitch
+      - name: Push by digest
+        if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/master')
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: server/Dockerfile
+          platforms: linux/${{ matrix.arch }}
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+      - name: Export digest
+        if: steps.push.outcome == 'success'
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.push.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+      - uses: actions/upload-artifact@v4
+        if: steps.push.outcome == 'success'
+        with:
+          name: digest-${{ matrix.arch }}
+          path: /tmp/digests/*
+          retention-days: 1
+
+  publish:
+    needs: build
+    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/master')
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digest-*
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=edge,enable=${{ github.ref == 'refs/heads/master' }}
+            type=sha,prefix=sha-
+      - name: Create manifest list
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.IMAGE }}@sha256:%s ' *)
