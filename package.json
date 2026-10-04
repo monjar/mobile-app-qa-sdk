@@ -6,7 +6,8 @@
   "license": "MIT",
   "workspaces": [
     "contract",
-    "server"
+    "server",
+    "dashboard"
   ],
   "engines": {
     "node": ">=22.13"
