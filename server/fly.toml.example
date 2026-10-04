@@ -1,0 +1,42 @@
+# Fly.io deployment for the Snitch server. Copy to fly.toml, set `app`, then:
+#
+#   fly apps create <app>
+#   fly volumes create snitch_data --size 3 --region <region>
+#   fly deploy --image ghcr.io/monjar/snitch-server:latest
+#   fly logs | grep setup        # one-time link to create the first admin
+#
+# Optional secrets: fly secrets set SNITCH_SMTP_URL=smtps://… SNITCH_MAIL_FROM="QA <qa@example.com>"
+app = "mochiro-snitch"
+primary_region = "lhr"
+kill_signal = "SIGTERM"
+kill_timeout = "15s"
+
+[env]
+  PORT = "8080"
+  SNITCH_PUBLIC_URL = "https://mochiro-snitch.fly.dev"
+  SNITCH_TRUST_PROXY = "fly"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Stop when idle to save cost: reports wake it (cold start ~1 s). The SDK
+  # retries uploads, so a slow first request loses nothing.
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/health"
+
+# SQLite + attachments live here. One machine only: Snitch is single-instance.
+[mounts]
+  source = "snitch_data"
+  destination = "/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
