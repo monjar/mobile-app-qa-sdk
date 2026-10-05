@@ -1,0 +1,18 @@
+# Versions for the Android build. Kotlin stays on 1.9.x so the published AAR
+# (and its kotlin-stdlib dependency) works in React Native 0.76 / Expo 52 apps.
+[versions]
+agp = "8.7.3"
+kotlin = "1.9.25"
+junit4 = "4.13.2"
+json = "20240303"
+androidxTestRunner = "1.6.2"
+
+[libraries]
+junit4 = { module = "junit:junit", version.ref = "junit4" }
+json = { module = "org.json:json", version.ref = "json" }
+androidx-test-runner = { module = "androidx.test:runner", version.ref = "androidxTestRunner" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+android-library = { id = "com.android.library", version.ref = "agp" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
