@@ -1,0 +1,66 @@
+name: release
+
+# Cuts a release from a v* tag (or a manual dry run):
+#   - checks VERSION, the tag and every package version agree
+#   - publishes react-native-snitch to npm (needs the NPM_TOKEN repository secret)
+#   - creates a GitHub Release with the npm tarball attached
+# The Docker image is published by docker.yml on the same tag; SwiftPM and
+# JitPack resolve straight from the tag.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Pack and verify only; publish nothing"
+        type: boolean
+        default: true
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  npm:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write   # npm provenance
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Versions agree
+        run: node scripts/bump-version.mjs --check ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+      - name: Build and test the package
+        working-directory: react-native
+        run: |
+          npm ci
+          npm run build
+          npm test
+          node ../scripts/check-pack.mjs
+          npm pack
+      - name: Publish to npm
+        if: github.ref_type == 'tag' || inputs.dry_run == false
+        working-directory: react-native
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then echo "::error::Add an NPM_TOKEN repository secret (an npm automation token) to publish."; exit 1; fi
+          npm publish --access public --provenance
+      - name: Dry run
+        if: github.ref_type != 'tag' && inputs.dry_run != false
+        working-directory: react-native
+        run: npm publish --access public --dry-run
+      - uses: actions/upload-artifact@v4
+        with:
+          name: react-native-snitch
+          path: react-native/react-native-snitch-*.tgz
+      - name: GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: react-native/react-native-snitch-*.tgz
+          generate_release_notes: true
