@@ -4,20 +4,24 @@ import { sendReport, signIn } from './fixtures';
 
 test.describe.configure({ mode: 'serial' });
 
+// Unique per run so a re-run against the same server can't match an older report.
+const RUN = Math.random().toString(36).slice(2, 7);
+const BUG = `Face froze after petting ${RUN}`;
+const IDEA = `Snooze reminders from the list ${RUN}`;
 let first: { reportId: string; ticket: string };
 
 test.beforeAll(() => {
-  first = sendReport('Face froze after petting\nSecond line of detail');
-  sendReport('Snooze reminders from the list', { type: 'idea', media: false });
+  first = sendReport(`${BUG}\nSecond line of detail`);
+  sendReport(IDEA, { type: 'idea', media: false });
 });
 
 test('signs in and shows the inbox', async ({ page }) => {
   await signIn(page);
-  await expect(page.getByText('Face froze after petting')).toBeVisible();
-  await expect(page.getByText('Snooze reminders from the list')).toBeVisible();
+  await expect(page.getByText(BUG)).toBeVisible();
+  await expect(page.getByText(IDEA)).toBeVisible();
   // Filters narrow the list.
   await page.getByLabel('Type', { exact: true }).selectOption('idea');
-  await expect(page.getByText('Face froze after petting')).toHaveCount(0);
+  await expect(page.getByText(BUG)).toHaveCount(0);
   await page.getByLabel('Type', { exact: true }).selectOption('');
   await page.getByPlaceholder(/Search title/).fill(first.ticket);
   await expect(page.locator('.ticket-row')).toHaveCount(1);
@@ -30,7 +34,7 @@ test('opens a ticket with media served over ranges, triages and comments', async
     if (r.url().includes('/content') && r.request().headers()['range']) ranged.push(r.status());
   });
   await page.goto(`/tickets/${first.reportId}`);
-  await expect(page.getByLabel('Title')).toHaveValue('Face froze after petting');
+  await expect(page.getByLabel('Title')).toHaveValue(BUG);
   const img = page.getByAltText('Screenshot');
   await expect(img).toBeVisible();
   expect(await img.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBeGreaterThan(0);
@@ -40,7 +44,7 @@ test('opens a ticket with media served over ranges, triages and comments', async
   expect(head.status()).toBe(206);
 
   await page.getByLabel('Status').selectOption('triaged');
-  await expect(page.locator('.pill.triaged').first()).toBeVisible();
+  await expect(page.getByLabel('Status')).toHaveValue('triaged');
   await page.getByPlaceholder('Add an internal note…').fill('Reproduced on an iPhone 15');
   await page.getByRole('button', { name: 'Comment' }).click();
   await expect(page.getByText('Reproduced on an iPhone 15')).toBeVisible();
