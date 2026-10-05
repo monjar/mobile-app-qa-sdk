@@ -92,7 +92,8 @@ test('share links open publicly until revoked', async ({ page }) => {
   const anon = await page.request.get(url, { headers: { cookie: '' } });
   expect(anon.status()).toBe(200);
   await page.getByRole('button', { name: 'Revoke' }).first().click();
-  await expect(page.getByText('Link revoked')).toBeVisible();
+  await expect(page.getByRole('status')).toHaveText('Link revoked');
+  await expect(page.getByText('Public link revoked')).toBeVisible();
   expect((await page.request.get(url)).status()).toBe(404);
 });
 
