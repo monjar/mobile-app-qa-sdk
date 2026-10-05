@@ -1,12 +1,11 @@
 /*
  * The upload state machine (spec §7.3) against a real local HTTP server
- * (com.sun.net.httpserver): create → PUT each attachment → complete, plus the
+ * (TestHttpServer): create → PUT each attachment → complete, plus the
  * error paths — 409 attachments_missing, 401 drop, 5xx/429 backoff with
  * Retry-After, 404 restart, offline, and resuming from state.json.
  */
 package io.github.monjar.snitch.report
 
-import com.sun.net.httpserver.HttpServer
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
@@ -19,7 +18,6 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
-import java.net.InetSocketAddress
 import java.util.concurrent.CopyOnWriteArrayList
 
 class UploaderTest {
@@ -35,7 +33,7 @@ class UploaderTest {
     @Volatile
     private var respond: (Recorded) -> Reply = { Reply(500) }
 
-    private lateinit var server: HttpServer
+    private lateinit var server: TestHttpServer
     private lateinit var outbox: Outbox
     private var now = 1_000_000L
     private val logger = object : SnitchLogger {
@@ -51,33 +49,23 @@ class UploaderTest {
 
     @Before
     fun setUp() {
-        server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-        server.createContext("/") { ex ->
-            val headers = ex.requestHeaders.entries.associate { (k, v) -> k.lowercase() to v.joinToString(",") }
-            val rec = Recorded(ex.requestMethod, ex.requestURI.path, headers, ex.requestBody.readBytes())
+        server = TestHttpServer { req ->
+            val rec = Recorded(req.method, req.path, req.headers, req.body)
             requests.add(rec)
             val reply = respond(rec)
-            reply.headers.forEach { (k, v) -> ex.responseHeaders.add(k, v) }
             val bytes = reply.body?.toByteArray()
-            if (bytes == null) {
-                ex.sendResponseHeaders(reply.status, -1)
-            } else {
-                ex.responseHeaders.add("Content-Type", "application/json")
-                ex.sendResponseHeaders(reply.status, bytes.size.toLong())
-                ex.responseBody.use { it.write(bytes) }
-            }
-            ex.close()
+            val headers = if (bytes == null) reply.headers else reply.headers + ("Content-Type" to "application/json")
+            TestHttpServer.Response(reply.status, headers, bytes)
         }
-        server.start()
         outbox = Outbox(tmp.newFolder("outbox"), logger)
     }
 
     @After
     fun tearDown() {
-        server.stop(0)
+        server.stop()
     }
 
-    private fun uploader(base: String = "http://127.0.0.1:${server.address.port}") = Uploader(
+    private fun uploader(base: String = "http://127.0.0.1:${server.port}") = Uploader(
         outbox = outbox,
         endpoint = { Endpoint(base, KEY, "android/0.1.0", "Snitch/0.1.0 (android)") },
         logger = logger,
@@ -374,7 +362,7 @@ class UploaderTest {
     @Test
     fun `network errors defer as offline`() {
         val dir = enqueue()
-        server.stop(0)
+        server.stop()
 
         val d = uploader().runOnce().outcomes.single() as UploadOutcome.Deferred
 
