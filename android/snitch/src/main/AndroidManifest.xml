@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Snitch core. Declares only network access and the autostart provider.
+  The provider calls Snitch.start(context) when the app's manifest has the
+  io.github.monjar.snitch.SERVER_URL meta-data; remove it with
+  tools:node="remove" to start Snitch from code instead.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <application>
+        <provider
+            android:name="io.github.monjar.snitch.SnitchInitProvider"
+            android:authorities="${applicationId}.snitch-init"
+            android:exported="false"
+            android:initOrder="-100" />
+    </application>
+</manifest>
