@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Zero-code Snitch setup: the meta-data below is all the SDK needs; its
+  SnitchInitProvider starts it before Application.onCreate.
+  10.0.2.2 is the host machine as seen from the Android emulator. Cleartext
+  HTTP to it is allowed only in debug builds (src/debug).
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application
+        android:allowBackup="false"
+        android:icon="@android:drawable/sym_def_app_icon"
+        android:label="Snitch Example"
+        android:supportsRtl="true"
+        android:theme="@android:style/Theme.Material.Light.DarkActionBar">
+
+        <meta-data
+            android:name="io.github.monjar.snitch.SERVER_URL"
+            android:value="http://10.0.2.2:8080" />
+        <meta-data
+            android:name="io.github.monjar.snitch.INGEST_KEY"
+            android:value="snitch_pk_0123456789ABCDEFGHJKMNPQRS" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:windowSoftInputMode="stateHidden|adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
