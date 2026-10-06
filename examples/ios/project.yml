@@ -1,0 +1,92 @@
+# XcodeGen spec for the Snitch example app. Generate the project with:
+#   cd examples/ios && xcodegen generate
+# The app depends on the Snitch package at the repository root (../..).
+name: SnitchExample
+
+options:
+  bundleIdPrefix: io.github.monjar.snitch
+  deploymentTarget:
+    iOS: "15.1"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    # Simulator-only example: ad-hoc signing, no team needed. Set your team to run on a device.
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "-"
+
+packages:
+  Snitch:
+    path: ../..
+
+targets:
+  SnitchExample:
+    type: application
+    platform: iOS
+    deploymentTarget: "15.1"
+    sources:
+      - path: SnitchExample
+    dependencies:
+      - package: Snitch
+        product: Snitch
+    info:
+      path: SnitchExample/Info.plist
+      properties:
+        CFBundleDisplayName: Snitch Example
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        UIApplicationSupportsIndirectInputEvents: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+          UISceneConfigurations:
+            UIWindowSceneSessionRoleApplication:
+              - UISceneConfigurationName: Default Configuration
+                UISceneDelegateClassName: $(PRODUCT_MODULE_NAME).SceneDelegate
+        # The CI server runs on the simulator host's loopback over plain HTTP.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        Snitch:
+          ServerURL: http://127.0.0.1:8080
+          IngestKey: snitch_pk_0123456789ABCDEFGHJKMNPQRS
+          Gesture: threeFingerHold
+          CaptureMode: snapshot
+          VideoMaxSeconds: 30
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.monjar.snitch.example
+        TARGETED_DEVICE_FAMILY: "1"
+
+  SnitchExampleUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "15.1"
+    sources:
+      - path: SnitchExampleUITests
+    dependencies:
+      - target: SnitchExample
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.monjar.snitch.example.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: SnitchExample
+        TARGETED_DEVICE_FAMILY: "1"
+
+schemes:
+  SnitchExample:
+    build:
+      targets:
+        SnitchExample: all
+        SnitchExampleUITests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - name: SnitchExampleUITests
