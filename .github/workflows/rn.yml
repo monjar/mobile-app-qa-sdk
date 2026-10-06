@@ -1,0 +1,283 @@
+name: react-native
+
+# react-native-snitch: package checks, then the packed tarball built into real Expo apps.
+#   plugin           — unit tests (config plugin + JS facade), typecheck, tarball contents; uploads the .tgz
+#   expo52-android   — Expo SDK 52 / RN 0.76.9 example (Mochiro's stack): prebuild + assembleDebug
+#   expo52-ios       — same app, Release build on the simulator, then end-to-end: the native SDK
+#                      autostarts from Info.plist, files a debug autoreport to a local Snitch
+#                      server, and the report (screenshot + video) is checked
+#   expo-latest-*    — the same screen on the latest Expo SDK: builds only
+#
+# The example apps depend on `file:../../react-native` for local development. CI points that
+# dependency at the packed tarball instead (and installs with `npm install`, which keeps every
+# other locked version): `npm ci` would run the linked package's `prepare` (sync + tsc), which
+# needs react-native/'s own dev dependencies, even with --ignore-scripts.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: rn-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CI: "1"
+  EXPO_NO_TELEMETRY: "1"
+  # Belt and braces: the examples never need the native sync, they get the tarball.
+  SNITCH_SKIP_SYNC: "1"
+
+jobs:
+  plugin:
+    name: package (tests, typecheck, tarball)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SNITCH_SKIP_SYNC: "0"
+    defaults:
+      run:
+        working-directory: react-native
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: react-native/package-lock.json
+      # `prepare` runs here: copies the iOS/Android cores into the package and builds lib/ + plugin/build.
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+      - run: npm run typecheck
+      - run: npm test
+      - name: Check tarball contents
+        run: node ../scripts/check-pack.mjs
+      - name: Pack
+        run: |
+          mkdir -p ../rn-tarball
+          npm pack --pack-destination ../rn-tarball
+          ls -l ../rn-tarball
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rn-tarball
+          path: rn-tarball/react-native-snitch-*.tgz
+          if-no-files-found: error
+          retention-days: 14
+
+  expo52-android:
+    name: expo52 android (assembleDebug)
+    needs: plugin
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: examples/expo52
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: examples/expo52/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: actions/download-artifact@v4
+        with:
+          name: rn-tarball
+          path: rn-tarball
+      - name: Install (react-native-snitch from the tarball)
+        run: |
+          TGZ=$(ls "$GITHUB_WORKSPACE"/rn-tarball/react-native-snitch-*.tgz)
+          REL=$(node -e 'console.log(require("path").relative(process.cwd(), process.argv[1]))' "$TGZ")
+          npm pkg set "dependencies.react-native-snitch=file:$REL"
+          npm install --no-audit --no-fund
+          test -f node_modules/react-native-snitch/android/src/main/java/io/github/monjar/snitch/Snitch.kt
+      - run: npx expo prebuild --platform android --no-install
+      - name: Show Snitch manifest entries
+        run: grep -n "io.github.monjar.snitch" android/app/src/main/AndroidManifest.xml
+      - name: assembleDebug
+        working-directory: examples/expo52/android
+        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace -PreactNativeArchitectures=x86_64
+
+  expo52-ios:
+    name: expo52 ios (Release simulator build + end-to-end report)
+    needs: plugin
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            examples/expo52/package-lock.json
+      - uses: actions/download-artifact@v4
+        with:
+          name: rn-tarball
+          path: rn-tarball
+      - name: Install (react-native-snitch from the tarball)
+        working-directory: examples/expo52
+        run: |
+          TGZ=$(ls "$GITHUB_WORKSPACE"/rn-tarball/react-native-snitch-*.tgz)
+          REL=$(node -e 'console.log(require("path").relative(process.cwd(), process.argv[1]))' "$TGZ")
+          npm pkg set "dependencies.react-native-snitch=file:$REL"
+          npm install --no-audit --no-fund
+          test -f node_modules/react-native-snitch/ios/core/Snitch.swift
+      - name: Prebuild (runs pod install)
+        working-directory: examples/expo52
+        run: |
+          xcodebuild -version
+          npx expo prebuild --platform ios
+          APP_NAME=$(basename ios/*.xcworkspace .xcworkspace)
+          echo "APP_NAME=$APP_NAME" >> "$GITHUB_ENV"
+          /usr/libexec/PlistBuddy -c "Print :Snitch" "ios/$APP_NAME/Info.plist"
+      - name: Pick a simulator
+        run: |
+          UDID=$(xcrun simctl list devices available -j | node -e '
+            const d = JSON.parse(require("fs").readFileSync(0, "utf8")).devices;
+            const ios = Object.keys(d).filter((k) => k.includes("iOS")).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+            for (const k of ios) { const p = d[k].find((x) => x.isAvailable && /^iPhone/.test(x.name)); if (p) { console.log(p.udid); break; } }')
+          test -n "$UDID"
+          echo "SIM_UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl list devices | grep "$UDID"
+      - name: Build (Release, so the JS bundle is embedded; simulator builds still detect as "debug")
+        working-directory: examples/expo52/ios
+        run: |
+          status=0
+          xcodebuild -workspace "$APP_NAME.xcworkspace" -scheme "$APP_NAME" -configuration Release \
+            -sdk iphonesimulator -destination "id=$SIM_UDID" -derivedDataPath build \
+            ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO \
+            build > "$RUNNER_TEMP/xcodebuild.log" 2>&1 || status=$?
+          grep -E "error:|warning: .*(snitch|Snitch)|\*\* BUILD" "$RUNNER_TEMP/xcodebuild.log" | tail -100 || true
+          if [ "$status" -ne 0 ]; then tail -150 "$RUNNER_TEMP/xcodebuild.log"; exit "$status"; fi
+          test -d "build/Build/Products/Release-iphonesimulator/$APP_NAME.app"
+      - name: Start the Snitch server
+        run: bash scripts/ci-start-server.sh
+      - name: Boot, install, launch with a debug autoreport
+        run: |
+          xcrun simctl boot "$SIM_UDID" || true
+          xcrun simctl bootstatus "$SIM_UDID" -b
+          xcrun simctl install "$SIM_UDID" "examples/expo52/ios/build/Build/Products/Release-iphonesimulator/$APP_NAME.app"
+          SIMCTL_CHILD_SNITCH_DEBUG_AUTOREPORT=10 \
+          SIMCTL_CHILD_SNITCH_DEBUG_SERVER_URL=http://127.0.0.1:8080 \
+            xcrun simctl launch "$SIM_UDID" io.github.monjar.snitch.expo52
+      - name: Wait for the report
+        run: node scripts/ci-await-report.mjs --server http://127.0.0.1:8080 --description autoreport --out "$RUNNER_TEMP/report" --timeout 600
+      - name: Check the video
+        run: |
+          if [ -f "$RUNNER_TEMP/report/video.mp4" ]; then
+            command -v ffprobe >/dev/null || brew install ffmpeg
+            bash scripts/verify-video.sh "$RUNNER_TEMP/report/video.mp4"
+          else
+            echo "::warning::the report has no video attachment"
+          fi
+      - name: Collect diagnostics
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/report"
+          xcrun simctl io "$SIM_UDID" screenshot "$RUNNER_TEMP/report/simulator.png" || true
+          xcrun simctl spawn "$SIM_UDID" log show --last 20m --style compact \
+            --predicate 'process == "'"$APP_NAME"'"' > "$RUNNER_TEMP/report/app.log" 2>&1 || true
+          cp "$RUNNER_TEMP/snitch-server.log" "$RUNNER_TEMP/report/" 2>/dev/null || true
+          cp "$RUNNER_TEMP/xcodebuild.log" "$RUNNER_TEMP/report/" 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: expo52-ios-report
+          path: ${{ runner.temp }}/report
+          if-no-files-found: ignore
+          retention-days: 14
+
+  expo-latest-android:
+    name: expo-latest android (assembleDebug)
+    needs: plugin
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    continue-on-error: false
+    defaults:
+      run:
+        working-directory: examples/expo-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: examples/expo-latest/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: actions/download-artifact@v4
+        with:
+          name: rn-tarball
+          path: rn-tarball
+      - name: Install (react-native-snitch from the tarball)
+        run: |
+          TGZ=$(ls "$GITHUB_WORKSPACE"/rn-tarball/react-native-snitch-*.tgz)
+          REL=$(node -e 'console.log(require("path").relative(process.cwd(), process.argv[1]))' "$TGZ")
+          npm pkg set "dependencies.react-native-snitch=file:$REL"
+          npm install --no-audit --no-fund
+      - run: npx expo prebuild --platform android --no-install
+      - name: assembleDebug
+        working-directory: examples/expo-latest/android
+        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace -PreactNativeArchitectures=x86_64
+
+  expo-latest-ios:
+    name: expo-latest ios (Release simulator build)
+    needs: plugin
+    runs-on: macos-15
+    timeout-minutes: 75
+    continue-on-error: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: examples/expo-latest/package-lock.json
+      - uses: actions/download-artifact@v4
+        with:
+          name: rn-tarball
+          path: rn-tarball
+      - name: Install (react-native-snitch from the tarball)
+        working-directory: examples/expo-latest
+        run: |
+          TGZ=$(ls "$GITHUB_WORKSPACE"/rn-tarball/react-native-snitch-*.tgz)
+          REL=$(node -e 'console.log(require("path").relative(process.cwd(), process.argv[1]))' "$TGZ")
+          npm pkg set "dependencies.react-native-snitch=file:$REL"
+          npm install --no-audit --no-fund
+      - name: Prebuild (runs pod install)
+        working-directory: examples/expo-latest
+        run: npx expo prebuild --platform ios
+      - name: Build (Release, simulator)
+        working-directory: examples/expo-latest/ios
+        run: |
+          APP_NAME=$(basename *.xcworkspace .xcworkspace)
+          status=0
+          xcodebuild -workspace "$APP_NAME.xcworkspace" -scheme "$APP_NAME" -configuration Release \
+            -sdk iphonesimulator -destination "generic/platform=iOS Simulator" -derivedDataPath build \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO \
+            build > "$RUNNER_TEMP/xcodebuild.log" 2>&1 || status=$?
+          grep -E "error:|warning: .*(snitch|Snitch)|\*\* BUILD" "$RUNNER_TEMP/xcodebuild.log" | tail -100 || true
+          if [ "$status" -ne 0 ]; then tail -150 "$RUNNER_TEMP/xcodebuild.log"; exit "$status"; fi
+          test -d "build/Build/Products/Release-iphonesimulator/$APP_NAME.app"
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: expo-latest-ios-xcodebuild-log
+          path: ${{ runner.temp }}/xcodebuild.log
+          if-no-files-found: ignore

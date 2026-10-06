@@ -1,0 +1,34 @@
+{
+  "expo": {
+    "name": "Snitch Expo52",
+    "slug": "snitch-expo52",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "bundleIdentifier": "io.github.monjar.snitch.expo52",
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": false,
+          "NSAllowsLocalNetworking": true
+        }
+      }
+    },
+    "android": {
+      "package": "io.github.monjar.snitch.expo52"
+    },
+    "plugins": [
+      [
+        "react-native-snitch",
+        {
+          "serverUrl": "http://127.0.0.1:8080",
+          "ingestKey": "snitch_pk_0123456789ABCDEFGHJKMNPQRS",
+          "enabledReleaseTypes": ["debug", "adhoc", "testflight", "internal"]
+        }
+      ],
+      "./plugins/withFmtXcode26Patch.js"
+    ]
+  }
+}
