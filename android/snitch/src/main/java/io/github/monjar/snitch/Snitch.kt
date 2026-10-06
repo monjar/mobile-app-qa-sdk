@@ -11,6 +11,7 @@
  */
 package io.github.monjar.snitch
 
+import android.app.Activity
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
@@ -185,6 +186,17 @@ object Snitch {
         val result = SnitchRuntime.create(app, config)
         detectedReleaseType = result.releaseType
         runtime = result.runtime
+    }
+
+    /**
+     * Tells Snitch which activity is on screen. Only needed when the init provider
+     * was removed and [start] runs after that activity resumed; otherwise Snitch
+     * tracks activities itself. Safe to call any time, from any thread.
+     */
+    @JvmStatic
+    fun attach(activity: Activity) {
+        ActivityTracker.note(activity)
+        onMain { runtime?.adopt(activity) }
     }
 
     /** Opens the report sheet (trigger `api`). [type] preselects a report type id. */

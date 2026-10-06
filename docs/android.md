@@ -59,6 +59,10 @@ config), remove it:
     android:authorities="${applicationId}.snitch-init" tools:node="remove" />
 ```
 
+Starting later than `Application.onCreate` (e.g. after a sign-in screen) is fine: the provider tracks the
+resumed activity from process start, and Snitch attaches to it when it starts. If you removed the provider
+*and* start after your first activity resumed, call `Snitch.attach(activity)` once with the visible activity.
+
 ## Options
 
 Manifest meta-data (prefix `io.github.monjar.snitch.`) or `SnitchOptions` in code:

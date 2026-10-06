@@ -4,9 +4,13 @@
  * starts the SDK when the app's manifest has the SERVER_URL meta-data; apps
  * that want to start from code can remove it with tools:node="remove".
  * Registration is cheap: config reads and network work happen off the main thread.
+ *
+ * It also installs ActivityTracker unconditionally, so an app that starts Snitch
+ * later from code (or from React Native's JS) can attach to the screen already showing.
  */
 package io.github.monjar.snitch
 
+import android.app.Application
 import android.content.ContentProvider
 import android.content.ContentValues
 import android.database.Cursor
@@ -17,6 +21,7 @@ class SnitchInitProvider : ContentProvider() {
     override fun onCreate(): Boolean {
         val ctx = context ?: return true
         try {
+            (ctx.applicationContext as? Application)?.let { ActivityTracker.install(it) }
             val md = ManifestConfigReader.metaData(ctx)
             if (md != null && md.containsKey(ManifestConfigReader.KEY_SERVER_URL)) Snitch.start(ctx)
         } catch (e: Throwable) {

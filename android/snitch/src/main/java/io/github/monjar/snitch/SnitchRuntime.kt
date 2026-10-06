@@ -247,6 +247,9 @@ internal class SnitchRuntime private constructor(
             }
         }
         debug?.let { applyDebug(it, atStart = true) }
+        // Started after the first screen resumed (JS start, or code in a later lifecycle
+        // step): attach to it now rather than waiting for the next resume.
+        ActivityTracker.resumedActivity?.let { current -> main.post { adopt(current) } }
         SnitchLog.info("started (${releaseType.wireValue}, ${options.captureMode.wireValue} capture, server $baseUrl)")
     }
 
@@ -371,6 +374,13 @@ internal class SnitchRuntime private constructor(
         wrap(activity)
         resumed = WeakReference(activity)
         onStateChanged()
+    }
+
+    /** Attaches to an activity that resumed before this runtime existed (or was missed). */
+    fun adopt(activity: Activity) {
+        if (isSnitchActivity(activity) || activity.isFinishing || resumedActivity0 === activity) return
+        screenshotObserver.register(activity)
+        onActivityResumed(activity)
     }
 
     override fun onActivityPaused(activity: Activity) {

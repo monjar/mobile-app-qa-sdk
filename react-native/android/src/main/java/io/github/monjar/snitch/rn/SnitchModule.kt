@@ -23,6 +23,8 @@ class SnitchModule(reactContext: ReactApplicationContext) : NativeSnitchSpec(rea
         if (serverUrl == null || ingestKey == null) return
         val map: Map<String, Any?> = options?.toHashMap() ?: emptyMap()
         Snitch.start(reactApplicationContext, serverUrl, ingestKey, SnitchOptions.fromMap(map))
+        // JS starts Snitch after MainActivity has resumed; hand it the screen that is showing.
+        reactApplicationContext.currentActivity?.let { Snitch.attach(it) }
     }
 
     override fun show(type: String?) {
