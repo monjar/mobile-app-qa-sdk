@@ -1,0 +1,31 @@
+{
+  "name": "snitch-dashboard",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Snitch admin dashboard (served by the Snitch server).",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests --dir src",
+    "e2e": "playwright test"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.90.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "wouter": "^3.7.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1",
+    "@snitch/contract": "*",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "typescript": "~5.9.3",
+    "vite": "^8.3.3",
+    "vitest": "^5.0.3"
+  }
+}

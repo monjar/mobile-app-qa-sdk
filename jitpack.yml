@@ -1,0 +1,6 @@
+# JitPack builds the Android libraries of this monorepo from android/.
+# Coordinates: com.github.monjar.mobile-app-qa-sdk:snitch:<tag> (and :snitch-system-capture:<tag>).
+jdk:
+  - openjdk17
+install:
+  - ./android/gradlew -p android :snitch:publishToMavenLocal :snitch-system-capture:publishToMavenLocal

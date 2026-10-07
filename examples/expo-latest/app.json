@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "Snitch Expo Latest",
+    "slug": "snitch-expo-latest",
+    "version": "1.0.0",
+    "ios": {
+      "bundleIdentifier": "io.github.monjar.snitch.expolatest"
+    },
+    "android": {
+      "package": "io.github.monjar.snitch.expolatest"
+    },
+    "plugins": [
+      [
+        "react-native-snitch",
+        {
+          "serverUrl": "http://127.0.0.1:8080",
+          "ingestKey": "snitch_pk_0123456789ABCDEFGHJKMNPQRS",
+          "enabledReleaseTypes": ["debug", "adhoc", "testflight", "internal"]
+        }
+      ]
+    ]
+  }
+}

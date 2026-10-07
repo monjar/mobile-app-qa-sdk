@@ -1,0 +1,65 @@
+// react-native-snitch — Android library: the `Snitch` TurboModule (src/main/java/.../rn)
+// plus the Snitch core and system-capture sources that scripts/sync-native-cores.mjs
+// copies next to it. Built inside the host app: the Android Gradle, Kotlin and React
+// Native Gradle plugins come from the app's root project (RN 0.76+ / Expo 52+).
+
+import groovy.json.JsonSlurper
+
+def snitchPackageJson = new JsonSlurper().parse(file("../package.json"))
+
+def snitchRootExt(String name, fallback) {
+  return rootProject.ext.has(name) ? rootProject.ext.get(name) : fallback
+}
+
+apply plugin: "com.android.library"
+apply plugin: "org.jetbrains.kotlin.android"
+apply plugin: "com.facebook.react"
+
+android {
+  namespace "io.github.monjar.snitch"
+  compileSdk snitchRootExt("compileSdkVersion", 35) as int
+
+  defaultConfig {
+    // The core needs API 24 (video: 26, checked at run time).
+    minSdk Math.max(snitchRootExt("minSdkVersion", 24) as int, 24)
+    consumerProguardFiles "proguard-rules.pro"
+    buildConfigField "String", "SNITCH_RN_VERSION", "\"${snitchPackageJson.version}\""
+  }
+
+  buildFeatures {
+    buildConfig true
+  }
+
+  buildTypes {
+    release {
+      minifyEnabled false
+    }
+  }
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+
+  lint {
+    disable "GradleCompatible"
+  }
+}
+
+// compilerOptions (not the kotlinOptions DSL, which Kotlin 2.2 rejects) exists since Kotlin 1.8.
+tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+  compilerOptions.jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+}
+
+dependencies {
+  // Version aligned with the app's react-native by the React Native Gradle plugin.
+  implementation "com.facebook.react:react-android"
+}
+
+// Codegen: generates io.github.monjar.snitch.rn.NativeSnitchSpec (Java) and the
+// RNSnitchSpec JNI glue from src/NativeSnitch.ts (package.json `codegenConfig`).
+react {
+  jsRootDir = file("../src")
+  libraryName = "RNSnitchSpec"
+  codegenJavaPackageName = "io.github.monjar.snitch.rn"
+}

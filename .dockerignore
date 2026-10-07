@@ -1,0 +1,17 @@
+# The image builds from the repo root (npm workspaces); keep the context to what it needs.
+**/node_modules
+**/dist
+**/data
+**/.env
+**/.env.*
+**/coverage
+**/test-results
+**/playwright-report
+.git
+.github
+ios
+android
+react-native
+examples
+docs
+Package.swift

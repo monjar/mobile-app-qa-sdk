@@ -1,0 +1,20 @@
+{
+  "clientReportId": "0b6f7a52-3c9e-4d8a-b1f2-7e6d5c4b3a29",
+  "type": "idea",
+  "description": "Would be nice to long-press a reminder to snooze it.",
+  "reportedAt": "2026-10-07T14:02:44+01:00",
+  "trigger": "api",
+  "app": { "id": "com.mochiro.app", "version": "0.6.0", "build": "15", "releaseType": "internal" },
+  "device": {
+    "platform": "android",
+    "osVersion": "15",
+    "model": "Pixel 8",
+    "manufacturer": "Google",
+    "locale": "en_US",
+    "network": "cellular"
+  },
+  "sdk": { "name": "snitch-android", "version": "0.1.0" },
+  "attachments": [
+    { "name": "screenshot", "contentType": "image/png", "sizeBytes": 220114, "sha256": "aa2c1d0e4b7a6f5e3d2c1b0a9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e", "width": 1080, "height": 2400 }
+  ]
+}

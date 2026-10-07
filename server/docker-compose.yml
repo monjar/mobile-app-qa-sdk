@@ -1,0 +1,42 @@
+# Snitch with Docker Compose.
+#
+#   curl -O https://raw.githubusercontent.com/monjar/mobile-app-qa-sdk/master/server/docker-compose.yml
+#   SNITCH_PUBLIC_URL=https://snitch.example.com docker compose up -d
+#   docker compose logs snitch | grep setup     # one-time link to create the first admin
+#
+# With a domain pointed at this machine, `docker compose --profile tls up -d`
+# also starts Caddy, which fetches and renews a TLS certificate automatically.
+services:
+  snitch:
+    image: ghcr.io/monjar/snitch-server:latest
+    restart: unless-stopped
+    environment:
+      SNITCH_PUBLIC_URL: ${SNITCH_PUBLIC_URL:-http://localhost:8080}
+      # Optional: email escalations. smtp://user:pass@host:587 or smtps://…:465
+      SNITCH_SMTP_URL: ${SNITCH_SMTP_URL:-}
+      SNITCH_MAIL_FROM: ${SNITCH_MAIL_FROM:-Snitch <snitch@localhost>}
+      # Behind Caddy below, trust its X-Forwarded-For for rate limiting.
+      SNITCH_TRUST_PROXY: ${SNITCH_TRUST_PROXY:-none}
+    ports:
+      - "${SNITCH_PORT:-8080}:8080"
+    volumes:
+      - snitch-data:/data
+
+  caddy:
+    profiles: ["tls"]
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      SNITCH_DOMAIN: ${SNITCH_DOMAIN:?set SNITCH_DOMAIN to your hostname}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on:
+      - snitch
+
+volumes:
+  snitch-data:
+  caddy-data:

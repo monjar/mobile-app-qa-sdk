@@ -1,0 +1,784 @@
+{
+ "description": "ThreeFingerHoldDetector vectors. Feed events in order to a detector built from DEFAULT_DETECTOR_CONFIG merged with `config`; `fires` lists the t of every event on which handle() returned true.",
+ "defaults": {
+  "pointers": 3,
+  "landingWindowMs": 150,
+  "holdMs": 250,
+  "slop": 10,
+  "cooldownMs": 1000,
+  "enabled": true
+ },
+ "cases": [
+  {
+   "name": "three fingers fire once held for holdMs after the last lands",
+   "events": [
+    {
+     "t": 0,
+     "type": "down",
+     "id": 1,
+     "x": 100,
+     "y": 100
+    },
+    {
+     "t": 20,
+     "type": "down",
+     "id": 2,
+     "x": 160,
+     "y": 110
+    },
+    {
+     "t": 40,
+     "type": "down",
+     "id": 3,
+     "x": 220,
+     "y": 120
+    },
+    {
+     "t": 100,
+     "type": "tick"
+    },
+    {
+     "t": 200,
+     "type": "tick"
+    },
+    {
+     "t": 289,
+     "type": "tick"
+    },
+    {
+     "t": 290,
+     "type": "tick"
+    },
+    {
+     "t": 300,
+     "type": "tick"
+    }
+   ],
+   "fires": [
+    290
+   ]
+  },
+  {
+   "name": "landing spread wider than the window never arms",
+   "events": [
+    {
+     "t": 0,
+     "type": "down",
+     "id": 1,
+     "x": 100,
+     "y": 100
+    },
+    {
+     "t": 80,
+     "type": "down",
+     "id": 2,
+     "x": 160,
+     "y": 110
+    },
+    {
+     "t": 160,
+     "type": "down",
+     "id": 3,
+     "x": 220,
+     "y": 120
+    },
+    {
+     "t": 300,
+     "type": "tick"
+    },
+    {
+     "t": 600,
+     "type": "tick"
+    },
+    {
+     "t": 1000,
+     "type": "tick"
+    }
+   ],
+   "fires": []
+  },
+  {
+   "name": "landing exactly at the window edge still arms",
+   "events": [
+    {
+     "t": 0,
+     "type": "down",
+     "id": 1,
+     "x": 100,
+     "y": 100
+    },
+    {
+     "t": 75,
+     "type": "down",
+     "id": 2,
+     "x": 160,
+     "y": 110
+    },
+    {
+     "t": 150,
+     "type": "down",
+     "id": 3,
+     "x": 220,
+     "y": 120
+    },
+    {
+     "t": 399,
+     "type": "tick"
+    },
+    {
+     "t": 400,
+     "type": "tick"
+    }
+   ],
+   "fires": [
+    400
+   ]
+  },
+  {
+   "name": "two-finger hold never fires",
+   "events": [
+    {
+     "t": 0,
+     "type": "down",
+     "id": 1,
+     "x": 100,
+     "y": 100
+    },
+    {
+     "t": 10,
+     "type": "down",
+     "id": 2,
+     "x": 150,
+     "y": 100
+    },
+    {
+     "t": 500,
+     "type": "tick"
+    },
+    {
+     "t": 1000,
+     "type": "tick"
+    },
+    {
+     "t": 3000,
+     "type": "tick"
+    },
+    {
+     "t": 4000,
+     "type": "tick"
+    }
+   ],
+   "fires": []
+  },
+  {
+   "name": "a fourth finger fails the sequence",
+   "events": [
+    {
+     "t": 0,
+     "type": "down",
+     "id": 1,
+     "x": 100,
+     "y": 100
+    },
+    {
+     "t": 10,
+     "type": "down",
+     "id": 2,
+     "x": 160,
+     "y": 110
+    },
+    {
+     "t": 20,
+     "type": "down",
+     "id": 3,
+     "x": 220,
+     "y": 120
+    },
+    {
+     "t": 30,
+     "type": "down",
+     "id": 4,
+     "x": 300,
+     "y": 100
+    },
+    {
+     "t": 300,
+     "type": "tick"
+    },
+    {
+     "t": 600,
+     "type": "tick"
+    }
+   ],
+   "fires": []
+  },
+  {
+   "name": "movement beyond slop fails",
+   "events": [
+    {
+     "t": 0,
+     "type": "down",
+     "id": 1,
+     "x": 100,
+     "y": 100
+    },
+    {
+     "t": 10,
+     "type": "down",
+     "id": 2,
+     "x": 160,
+     "y": 110
+    },
+    {
+     "t": 20,
+     "type": "down",
+     "id": 3,
+     "x": 220,
+     "y": 120
+    },
+    {
+     "t": 100,
+     "type": "move",
+     "id": 2,
+     "x": 168,
+     "y": 118
+    },
+    {
+     "t": 300,
+     "type": "tick"
+    },
+    {
+     "t": 600,
+     "type": "tick"
+    }
+   ],
+   "fires": []
+  },
+  {
+   "name": "movement within slop keeps the hold",
+   "events": [
+    {
+     "t": 0,
+     "type": "down",
+     "id": 1,
+     "x": 100,
+     "y": 100
+    },
+    {
+     "t": 10,
+     "type": "down",
+     "id": 2,
+     "x": 160,
+     "y": 110
+    },
+    {
+     "t": 20,
+     "type": "down",
+     "id": 3,
+     "x": 220,
+     "y": 120
+    },
+    {
+     "t": 100,
+     "type": "move",
+     "id": 1,
+     "x": 106,
+     "y": 106
+    },
+    {
+     "t": 269,
+     "type": "tick"
+    },
+    {
+     "t": 270,
+     "type": "tick"
+    }
+   ],
+   "fires": [
+    270
+   ]
+  },
+  {
+   "name": "a lift before the hold fails until every finger is up",
+   "events": [
+    {
+     "t": 0,
+     "type": "down",
+     "id": 1,
+     "x": 100,
+     "y": 100
+    },
+    {
+     "t": 10,
+     "type": "down",
+     "id": 2,
+     "x": 160,
+     "y": 110
+    },
+    {
+     "t": 20,
+     "type": "down",
+     "id": 3,
+     "x": 220,
+     "y": 120
+    },
+    {
+     "t": 150,
+     "type": "up",
+     "id": 3,
+     "x": 0,
+     "y": 0
+    },
+    {
+     "t": 160,
+     "type": "down",
+     "id": 3,
+     "x": 220,
+     "y": 120
+    },
+    {
+     "t": 450,
+     "type": "tick"
+    },
+    {
+     "t": 700,
+     "type": "tick"
+    }
+   ],
+   "fires": []
+  },
+  {
+   "name": "fires only once per sequence",
+   "events": [
+    {
+     "t": 0,
+     "type": "down",
+     "id": 1,
+     "x": 100,
+     "y": 100
+    },
+    {
+     "t": 10,
+     "type": "down",
+     "id": 2,
+     "x": 160,
+     "y": 110
+    },
+    {
+     "t": 20,
+     "type": "down",
+     "id": 3,
+     "x": 220,
+     "y": 120
+    },
+    {
+     "t": 270,
+     "type": "tick"
+    },
+    {
+     "t": 600,
+     "type": "tick"
+    },
+    {
+     "t": 1500,
+     "type": "tick"
+    }
+   ],
+   "fires": [
+    270
+   ]
+  },
+  {
+   "name": "cooldown blocks a second sequence too soon after the first",
+   "events": [
+    {
+     "t": 0,
+     "type": "down",
+     "id": 1,
+     "x": 100,
+     "y": 100
+    },
+    {
+     "t": 10,
+     "type": "down",
+     "id": 2,
+     "x": 160,
+     "y": 110
+    },
+    {
+     "t": 20,
+     "type": "down",
+     "id": 3,
+     "x": 220,
+     "y": 120
+    },
+    {
+     "t": 270,
+     "type": "tick"
+    },
+    {
+     "t": 300,
+     "type": "up",
+     "id": 1,
+     "x": 0,
+     "y": 0
+    },
+    {
+     "t": 301,
+     "type": "up",
+     "id": 2,
+     "x": 0,
+     "y": 0
+    },
+    {
+     "t": 302,
+     "type": "up",
+     "id": 3,
+     "x": 0,
+     "y": 0
+    },
+    {
+     "t": 400,
+     "type": "down",
+     "id": 1,
+     "x": 100,
+     "y": 100
+    },
+    {
+     "t": 410,
+     "type": "down",
+     "id": 2,
+     "x": 160,
+     "y": 110
+    },
+    {
+     "t": 420,
+     "type": "down",
+     "id": 3,
+     "x": 220,
+     "y": 120
+    },
+    {
+     "t": 670,
+     "type": "tick"
+    },
+    {
+     "t": 700,
+     "type": "tick"
+    },
+    {
+     "t": 710,
+     "type": "up",
+     "id": 1,
+     "x": 0,
+     "y": 0
+    },
+    {
+     "t": 711,
+     "type": "up",
+     "id": 2,
+     "x": 0,
+     "y": 0
+    },
+    {
+     "t": 712,
+     "type": "up",
+     "id": 3,
+     "x": 0,
+     "y": 0
+    },
+    {
+     "t": 1400,
+     "type": "down",
+     "id": 1,
+     "x": 100,
+     "y": 100
+    },
+    {
+     "t": 1410,
+     "type": "down",
+     "id": 2,
+     "x": 160,
+     "y": 110
+    },
+    {
+     "t": 1420,
+     "type": "down",
+     "id": 3,
+     "x": 220,
+     "y": 120
+    },
+    {
+     "t": 1669,
+     "type": "tick"
+    },
+    {
+     "t": 1670,
+     "type": "tick"
+    }
+   ],
+   "fires": [
+    270,
+    1670
+   ]
+  },
+  {
+   "name": "a disabled detector never fires",
+   "config": {
+    "enabled": false
+   },
+   "events": [
+    {
+     "t": 0,
+     "type": "down",
+     "id": 1,
+     "x": 100,
+     "y": 100
+    },
+    {
+     "t": 20,
+     "type": "down",
+     "id": 2,
+     "x": 160,
+     "y": 110
+    },
+    {
+     "t": 40,
+     "type": "down",
+     "id": 3,
+     "x": 220,
+     "y": 120
+    },
+    {
+     "t": 290,
+     "type": "tick"
+    },
+    {
+     "t": 600,
+     "type": "tick"
+    }
+   ],
+   "fires": []
+  },
+  {
+   "name": "cancel counts as a lift",
+   "events": [
+    {
+     "t": 0,
+     "type": "down",
+     "id": 1,
+     "x": 100,
+     "y": 100
+    },
+    {
+     "t": 10,
+     "type": "down",
+     "id": 2,
+     "x": 160,
+     "y": 110
+    },
+    {
+     "t": 20,
+     "type": "down",
+     "id": 3,
+     "x": 220,
+     "y": 120
+    },
+    {
+     "t": 100,
+     "type": "cancel",
+     "id": 1,
+     "x": 0,
+     "y": 0
+    },
+    {
+     "t": 300,
+     "type": "tick"
+    }
+   ],
+   "fires": []
+  },
+  {
+   "name": "fire is evaluated on move events as well as ticks",
+   "events": [
+    {
+     "t": 0,
+     "type": "down",
+     "id": 1,
+     "x": 100,
+     "y": 100
+    },
+    {
+     "t": 10,
+     "type": "down",
+     "id": 2,
+     "x": 160,
+     "y": 110
+    },
+    {
+     "t": 20,
+     "type": "down",
+     "id": 3,
+     "x": 220,
+     "y": 120
+    },
+    {
+     "t": 100,
+     "type": "move",
+     "id": 1,
+     "x": 101,
+     "y": 101
+    },
+    {
+     "t": 200,
+     "type": "move",
+     "id": 1,
+     "x": 102,
+     "y": 102
+    },
+    {
+     "t": 271,
+     "type": "move",
+     "id": 1,
+     "x": 103,
+     "y": 103
+    }
+   ],
+   "fires": [
+    271
+   ]
+  },
+  {
+   "name": "a tap before the hold does not poison the next sequence",
+   "events": [
+    {
+     "t": 0,
+     "type": "down",
+     "id": 1,
+     "x": 100,
+     "y": 100
+    },
+    {
+     "t": 50,
+     "type": "up",
+     "id": 1,
+     "x": 0,
+     "y": 0
+    },
+    {
+     "t": 100,
+     "type": "down",
+     "id": 1,
+     "x": 100,
+     "y": 100
+    },
+    {
+     "t": 110,
+     "type": "down",
+     "id": 2,
+     "x": 160,
+     "y": 110
+    },
+    {
+     "t": 120,
+     "type": "down",
+     "id": 3,
+     "x": 220,
+     "y": 120
+    },
+    {
+     "t": 369,
+     "type": "tick"
+    },
+    {
+     "t": 370,
+     "type": "tick"
+    }
+   ],
+   "fires": [
+    370
+   ]
+  },
+  {
+   "name": "a single long press never fires",
+   "events": [
+    {
+     "t": 0,
+     "type": "down",
+     "id": 1,
+     "x": 100,
+     "y": 100
+    },
+    {
+     "t": 250,
+     "type": "tick"
+    },
+    {
+     "t": 500,
+     "type": "tick"
+    },
+    {
+     "t": 600,
+     "type": "tick"
+    },
+    {
+     "t": 800,
+     "type": "tick"
+    },
+    {
+     "t": 2000,
+     "type": "tick"
+    }
+   ],
+   "fires": []
+  },
+  {
+   "name": "custom config: four fingers, longer hold",
+   "config": {
+    "pointers": 4,
+    "holdMs": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "type": "down",
+     "id": 1,
+     "x": 100,
+     "y": 100
+    },
+    {
+     "t": 10,
+     "type": "down",
+     "id": 2,
+     "x": 160,
+     "y": 110
+    },
+    {
+     "t": 20,
+     "type": "down",
+     "id": 3,
+     "x": 220,
+     "y": 120
+    },
+    {
+     "t": 30,
+     "type": "down",
+     "id": 4,
+     "x": 300,
+     "y": 100
+    },
+    {
+     "t": 529,
+     "type": "tick"
+    },
+    {
+     "t": 530,
+     "type": "tick"
+    }
+   ],
+   "fires": [
+    530
+   ]
+  }
+ ]
+}

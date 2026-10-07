@@ -1,0 +1,19 @@
+node_modules/
+*.tgz
+*.tsbuildinfo
+
+# Build output (shipped in the npm tarball, not committed)
+/lib/
+/plugin/build/
+
+# Native cores copied by ../scripts/sync-native-cores.mjs (shipped in the npm tarball)
+/ios/core/
+/android/src/main/java/io/github/monjar/snitch/*
+!/android/src/main/java/io/github/monjar/snitch/rn/
+
+# Gradle / Xcode
+/android/build/
+/android/.gradle/
+/android/.cxx/
+/android/local.properties
+/ios/build/

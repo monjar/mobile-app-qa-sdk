@@ -1,0 +1,46 @@
+{
+  "clientReportId": "6f1c2a8e-5d4b-4c1e-9a7f-2b3c4d5e6f70",
+  "type": "bug",
+  "description": "Petting the face froze it for a second.\nHappened twice after waking the app.",
+  "reporter": { "email": "tester@example.com" },
+  "reportedAt": "2026-10-07T13:55:02.120Z",
+  "trigger": "gesture",
+  "app": { "id": "com.mochiro.app", "name": "Mochiro", "version": "0.6.0", "build": "15", "releaseType": "testflight" },
+  "device": {
+    "platform": "ios",
+    "osVersion": "26.0.1",
+    "model": "iPhone16,2",
+    "manufacturer": "Apple",
+    "locale": "en_GB",
+    "timeZone": "Europe/London",
+    "screen": { "width": 393, "height": 852, "scale": 3, "orientation": "portrait" },
+    "memory": { "appMB": 312, "totalMB": 8192 },
+    "thermal": "nominal",
+    "lowPower": false,
+    "battery": 0.82,
+    "charging": false,
+    "network": "wifi",
+    "darkMode": true,
+    "screenReader": false,
+    "fontScale": 1
+  },
+  "sdk": { "name": "snitch-ios", "version": "0.1.0", "wrapper": "react-native", "wrapperVersion": "0.1.0" },
+  "custom": { "userTier": "beta" },
+  "stats": {
+    "captureMode": "snapshot",
+    "snapshotRenderer": "drawHierarchy",
+    "captureMsP50": 6.1,
+    "captureMsP95": 11.8,
+    "effectiveFps": 1.4,
+    "ringBytes": 2411520,
+    "bufferedSeconds": 30,
+    "composeMs": 812,
+    "framesSkipped": 3,
+    "uptimeSec": 642,
+    "crashLoopDowngrades": 0
+  },
+  "attachments": [
+    { "name": "screenshot", "contentType": "image/jpeg", "sizeBytes": 412833, "sha256": "9f2c1d0e4b7a6f5e3d2c1b0a9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e", "width": 1179, "height": 2556 },
+    { "name": "video", "contentType": "video/mp4", "sizeBytes": 1288211, "sha256": "0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7", "width": 393, "height": 852, "durationMs": 15000 }
+  ]
+}

@@ -1,0 +1,306 @@
+{
+ "description": "FrameRing vectors. ops: push(t,size,checksum); expect(ts,totalBytes) checks every frame's t; select(endT,durationMs) \u2192 ts; trimHalf; buffered(endT) \u2192 ms.",
+ "cases": [
+  {
+   "name": "keeps frames inside the age window plus the one on screen at its start",
+   "maxBytes": 10000,
+   "maxAgeMs": 3000,
+   "ops": [
+    {
+     "op": "push",
+     "t": 0,
+     "size": 100,
+     "checksum": "a"
+    },
+    {
+     "op": "push",
+     "t": 1000,
+     "size": 100,
+     "checksum": "b"
+    },
+    {
+     "op": "push",
+     "t": 2000,
+     "size": 100,
+     "checksum": "c"
+    },
+    {
+     "op": "push",
+     "t": 3000,
+     "size": 100,
+     "checksum": "d"
+    },
+    {
+     "op": "push",
+     "t": 3500,
+     "size": 100,
+     "checksum": "e"
+    },
+    {
+     "op": "push",
+     "t": 4200,
+     "size": 100,
+     "checksum": "f"
+    },
+    {
+     "op": "expect",
+     "ts": [
+      1000,
+      2000,
+      3000,
+      3500,
+      4200
+     ],
+     "totalBytes": 500
+    }
+   ]
+  },
+  {
+   "name": "drops consecutive duplicates",
+   "maxBytes": 10000,
+   "maxAgeMs": 30000,
+   "ops": [
+    {
+     "op": "push",
+     "t": 0,
+     "size": 100,
+     "checksum": "a"
+    },
+    {
+     "op": "push",
+     "t": 250,
+     "size": 100,
+     "checksum": "a"
+    },
+    {
+     "op": "push",
+     "t": 500,
+     "size": 100,
+     "checksum": "b"
+    },
+    {
+     "op": "push",
+     "t": 750,
+     "size": 100,
+     "checksum": "b"
+    },
+    {
+     "op": "push",
+     "t": 1000,
+     "size": 100,
+     "checksum": "a"
+    },
+    {
+     "op": "expect",
+     "ts": [
+      0,
+      500,
+      1000
+     ],
+     "totalBytes": 300
+    }
+   ]
+  },
+  {
+   "name": "byte cap evicts the oldest first",
+   "maxBytes": 250,
+   "maxAgeMs": 30000,
+   "ops": [
+    {
+     "op": "push",
+     "t": 0,
+     "size": 100,
+     "checksum": "a"
+    },
+    {
+     "op": "push",
+     "t": 100,
+     "size": 100,
+     "checksum": "b"
+    },
+    {
+     "op": "push",
+     "t": 200,
+     "size": 100,
+     "checksum": "c"
+    },
+    {
+     "op": "expect",
+     "ts": [
+      100,
+      200
+     ],
+     "totalBytes": 200
+    },
+    {
+     "op": "push",
+     "t": 300,
+     "size": 300,
+     "checksum": "d"
+    },
+    {
+     "op": "expect",
+     "ts": [
+      300
+     ],
+     "totalBytes": 300
+    }
+   ]
+  },
+  {
+   "name": "select returns the lead frame then the frames inside the window",
+   "maxBytes": 100000,
+   "maxAgeMs": 30000,
+   "ops": [
+    {
+     "op": "push",
+     "t": 0,
+     "size": 10,
+     "checksum": "a"
+    },
+    {
+     "op": "push",
+     "t": 1000,
+     "size": 10,
+     "checksum": "b"
+    },
+    {
+     "op": "push",
+     "t": 2000,
+     "size": 10,
+     "checksum": "c"
+    },
+    {
+     "op": "push",
+     "t": 3000,
+     "size": 10,
+     "checksum": "d"
+    },
+    {
+     "op": "push",
+     "t": 4000,
+     "size": 10,
+     "checksum": "e"
+    },
+    {
+     "op": "select",
+     "endT": 3500,
+     "durationMs": 2000,
+     "ts": [
+      1000,
+      2000,
+      3000
+     ]
+    },
+    {
+     "op": "select",
+     "endT": 4000,
+     "durationMs": 1000,
+     "ts": [
+      3000,
+      4000
+     ]
+    },
+    {
+     "op": "select",
+     "endT": 4500,
+     "durationMs": 10000,
+     "ts": [
+      0,
+      1000,
+      2000,
+      3000,
+      4000
+     ]
+    },
+    {
+     "op": "select",
+     "endT": 500,
+     "durationMs": 1000,
+     "ts": [
+      0
+     ]
+    },
+    {
+     "op": "buffered",
+     "endT": 4500,
+     "ms": 4500
+    }
+   ]
+  },
+  {
+   "name": "trimHalf drops the oldest half",
+   "maxBytes": 100000,
+   "maxAgeMs": 30000,
+   "ops": [
+    {
+     "op": "push",
+     "t": 0,
+     "size": 10,
+     "checksum": "a"
+    },
+    {
+     "op": "push",
+     "t": 1,
+     "size": 10,
+     "checksum": "b"
+    },
+    {
+     "op": "push",
+     "t": 2,
+     "size": 10,
+     "checksum": "c"
+    },
+    {
+     "op": "push",
+     "t": 3,
+     "size": 10,
+     "checksum": "d"
+    },
+    {
+     "op": "push",
+     "t": 4,
+     "size": 10,
+     "checksum": "e"
+    },
+    {
+     "op": "trimHalf"
+    },
+    {
+     "op": "expect",
+     "ts": [
+      2,
+      3,
+      4
+     ],
+     "totalBytes": 30
+    }
+   ]
+  },
+  {
+   "name": "a single oversized frame is kept",
+   "maxBytes": 50,
+   "maxAgeMs": 30000,
+   "ops": [
+    {
+     "op": "push",
+     "t": 0,
+     "size": 80,
+     "checksum": "a"
+    },
+    {
+     "op": "expect",
+     "ts": [
+      0
+     ],
+     "totalBytes": 80
+    },
+    {
+     "op": "buffered",
+     "endT": 0,
+     "ms": 0
+    }
+   ]
+  }
+ ]
+}

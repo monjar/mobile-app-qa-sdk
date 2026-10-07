@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  react-native-snitch. Like the core library: network access and the autostart
+  provider, which calls Snitch.start(context) when the app's manifest has the
+  io.github.monjar.snitch.SERVER_URL meta-data (the Expo config plugin writes it).
+  Remove the provider with tools:node="remove" to start Snitch from JavaScript instead.
+
+  The system-capture service and activity are not declared here: the config
+  plugin adds them (and their permissions) only for captureMode "system".
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <application>
+        <provider
+            android:name="io.github.monjar.snitch.SnitchInitProvider"
+            android:authorities="${applicationId}.snitch-init"
+            android:exported="false"
+            android:initOrder="-100" />
+    </application>
+</manifest>

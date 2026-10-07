@@ -1,0 +1,9 @@
+# TLS in front of Snitch. Used by `docker compose --profile tls up -d`.
+# Set SNITCH_TRUST_PROXY=xff on the snitch service so rate limits see real client IPs.
+{$SNITCH_DOMAIN} {
+	encode zstd gzip
+	request_body {
+		max_size 32MB
+	}
+	reverse_proxy snitch:8080
+}

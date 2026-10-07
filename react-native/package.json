@@ -1,0 +1,102 @@
+{
+  "name": "react-native-snitch",
+  "version": "0.1.0",
+  "description": "Snitch for React Native and Expo: testers hold three fingers on the screen to send a bug report with a screenshot and the last seconds of screen video to your own server.",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "react-native": "src/index.ts",
+  "source": "src/index.ts",
+  "files": [
+    "src",
+    "lib",
+    "ios",
+    "android",
+    "plugin/build",
+    "app.plugin.js",
+    "react-native.config.js",
+    "react-native-snitch.podspec",
+    "README.md",
+    "LICENSE",
+    "!**/__tests__",
+    "!**/__mocks__",
+    "!**/*.test.*",
+    "!**/*.tsbuildinfo",
+    "!android/build",
+    "!android/.gradle",
+    "!android/.cxx",
+    "!android/local.properties",
+    "!ios/build"
+  ],
+  "scripts": {
+    "sync-native": "node ../scripts/sync-native-cores.mjs",
+    "clean": "node -e \"for (const d of ['lib', 'plugin/build']) require('node:fs').rmSync(d, { recursive: true, force: true })\"",
+    "build": "npm run clean && tsc -p tsconfig.build.json && tsc -p plugin/tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.build.json --noEmit && tsc -p plugin/tsconfig.json --noEmit",
+    "test": "vitest run",
+    "check-pack": "node ../scripts/check-pack.mjs",
+    "prepare": "npm run sync-native && npm run build",
+    "prepack": "npm run sync-native"
+  },
+  "keywords": [
+    "react-native",
+    "expo",
+    "expo-config-plugin",
+    "turbo-module",
+    "ios",
+    "android",
+    "qa",
+    "bug-report",
+    "feedback",
+    "beta-testing",
+    "testflight",
+    "screenshot",
+    "screen-recording"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/monjar/mobile-app-qa-sdk.git",
+    "directory": "react-native"
+  },
+  "homepage": "https://github.com/monjar/mobile-app-qa-sdk/tree/main/react-native#readme",
+  "bugs": {
+    "url": "https://github.com/monjar/mobile-app-qa-sdk/issues"
+  },
+  "author": "Amirali Monjar",
+  "license": "MIT",
+  "peerDependencies": {
+    "expo": ">=52.0.0",
+    "react": ">=18.0.0",
+    "react-native": ">=0.76.0"
+  },
+  "peerDependenciesMeta": {
+    "expo": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@expo/plist": "^0.2.2",
+    "@types/node": "^24.0.0",
+    "@types/react": "~18.3.12",
+    "expo": "~52.0.49",
+    "react": "18.3.1",
+    "react-native": "0.76.9",
+    "typescript": "~5.9.3",
+    "vitest": "^5.0.3"
+  },
+  "codegenConfig": {
+    "name": "RNSnitchSpec",
+    "type": "modules",
+    "jsSrcsDir": "src",
+    "android": {
+      "javaPackageName": "io.github.monjar.snitch.rn"
+    },
+    "ios": {
+      "modulesProvider": {
+        "Snitch": "RNSnitch"
+      }
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

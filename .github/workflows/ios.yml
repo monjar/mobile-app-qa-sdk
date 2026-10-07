@@ -1,0 +1,140 @@
+name: iOS
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  swiftpm-tests:
+    name: swiftpm-tests
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Pick an iPhone simulator
+        id: sim
+        run: bash ios/scripts/pick-simulator.sh
+
+      - name: Pick the package test scheme
+        id: scheme
+        run: |
+          set -euo pipefail
+          schemes="$(xcodebuild -list -json | python3 -c 'import json, sys; d = json.load(sys.stdin); c = d.get("workspace") or d.get("project") or {}; print("\n".join(c.get("schemes", [])))')"
+          echo "Schemes:"; echo "$schemes"
+          if echo "$schemes" | grep -qx 'Snitch-Package'; then scheme=Snitch-Package; else scheme=Snitch; fi
+          echo "name=$scheme" >> "$GITHUB_OUTPUT"
+
+      - name: Unit tests (contract vectors, uploader, composer…)
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -scheme "${{ steps.scheme.outputs.name }}" \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -resultBundlePath "$RUNNER_TEMP/SnitchTests.xcresult" \
+            | tee "$RUNNER_TEMP/swiftpm-tests.log"
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: swiftpm-tests-xcresult
+          path: |
+            ${{ runner.temp }}/SnitchTests.xcresult
+            ${{ runner.temp }}/swiftpm-tests.log
+          if-no-files-found: warn
+
+  example-e2e:
+    name: example-e2e
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Start the Snitch server (127.0.0.1:8080, seeded project)
+        run: bash scripts/ci-start-server.sh
+
+      - name: Generate the example project
+        working-directory: examples/ios
+        run: xcodegen generate
+
+      - name: Pick an iPhone simulator
+        id: sim
+        run: bash ios/scripts/pick-simulator.sh
+
+      - name: UI tests (autoreport + touch cancellation)
+        working-directory: examples/ios
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project SnitchExample.xcodeproj \
+            -scheme SnitchExample \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -resultBundlePath "$RUNNER_TEMP/SnitchExample.xcresult" \
+            | tee "$RUNNER_TEMP/example-e2e.log"
+
+      - name: Wait for the autoreport on the server
+        if: ${{ !cancelled() }}
+        run: >-
+          node scripts/ci-await-report.mjs
+          --server http://127.0.0.1:8080
+          --description autoreport
+          --out "$RUNNER_TEMP/report"
+          --timeout 300
+
+      - name: Verify the uploaded video
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -f "$RUNNER_TEMP/report/video.mp4" ]; then
+            command -v ffprobe >/dev/null || brew install ffmpeg
+            bash scripts/verify-video.sh "$RUNNER_TEMP/report/video.mp4"
+          else
+            echo "::warning::The downloaded report has no video.mp4"
+          fi
+
+      - name: Upload the received report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-e2e-report
+          path: ${{ runner.temp }}/report
+          if-no-files-found: warn
+
+      - name: Upload UI test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: example-e2e-xcresult
+          path: |
+            ${{ runner.temp }}/SnitchExample.xcresult
+            ${{ runner.temp }}/example-e2e.log
+          if-no-files-found: warn

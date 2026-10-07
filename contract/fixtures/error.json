@@ -1,0 +1,1 @@
+{ "error": { "code": "attachments_missing", "message": "Some declared attachments have not been uploaded.", "details": { "missing": ["video"] } } }
