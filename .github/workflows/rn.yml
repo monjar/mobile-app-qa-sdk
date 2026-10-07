@@ -236,7 +236,8 @@ jobs:
   expo-latest-ios:
     name: expo-latest ios (Release simulator build)
     needs: plugin
-    runs-on: macos-15
+    # macos-26 for Xcode 26.4+: expo-modules-jsi 57.x does not compile with Xcode 26.2/26.3 (expo/expo#50067).
+    runs-on: macos-26
     timeout-minutes: 75
     continue-on-error: false
     steps:
@@ -266,6 +267,7 @@ jobs:
       - name: Build (Release, simulator)
         working-directory: examples/expo-latest/ios
         run: |
+          xcodebuild -version
           APP_NAME=$(basename *.xcworkspace .xcworkspace)
           status=0
           xcodebuild -workspace "$APP_NAME.xcworkspace" -scheme "$APP_NAME" -configuration Release \

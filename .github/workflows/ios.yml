@@ -115,6 +115,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           if [ -f "$RUNNER_TEMP/report/video.mp4" ]; then
+            command -v ffprobe >/dev/null || brew install ffmpeg
             bash scripts/verify-video.sh "$RUNNER_TEMP/report/video.mp4"
           else
             echo "::warning::The downloaded report has no video.mp4"
