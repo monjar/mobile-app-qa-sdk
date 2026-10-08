@@ -45,16 +45,27 @@ from the dashboard if needed.
 
 This is a separate app from `mochiro-server`, so neither can take the other down.
 
+In an empty folder (the example config already has `app = "mochiro-snitch"` and the matching `SNITCH_PUBLIC_URL`;
+the password needs at least 10 characters):
+
 ```sh
-cp server/fly.toml.example fly.toml   # app = "mochiro-snitch", SNITCH_PUBLIC_URL = "https://mochiro-snitch.fly.dev"
+curl -o fly.toml https://raw.githubusercontent.com/monjar/mobile-app-qa-sdk/master/server/fly.toml.example
 fly apps create mochiro-snitch
 fly volumes create snitch_data --size 3 --region lhr
 fly secrets set SNITCH_BOOTSTRAP_ADMIN_EMAIL=you@example.com SNITCH_BOOTSTRAP_ADMIN_PASSWORD='…'
-# optional, for email escalation:
-fly secrets set SNITCH_SMTP_URL='smtps://user:pass@smtp.example.com:465' SNITCH_MAIL_FROM='Mochiro QA <qa@mochiro.co.uk>'
 fly deploy --image ghcr.io/monjar/snitch-server:latest
+```
 
-# Register the key the app is built with:
+Optional, for email escalation:
+
+```sh
+fly secrets set SNITCH_SMTP_URL='smtps://user:pass@smtp.example.com:465' SNITCH_MAIL_FROM='Mochiro QA <qa@mochiro.co.uk>'
+```
+
+Register the key the app is built with. The machine stops when idle, so wake it first:
+
+```sh
+curl https://mochiro-snitch.fly.dev/health
 fly ssh console -C "snitch project:create --name Mochiro --slug mochiro --prefix MOCH --ingest-key snitch_pk_5RC0ZGHHBTYSTSWPWY17N0N4MK"
 ```
 

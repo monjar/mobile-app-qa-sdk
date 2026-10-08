@@ -185,6 +185,8 @@ has been uploaded. Ignored unless the release type is `debug`.
 
 ```sh
 cd android
-./gradlew :snitch:testDebugUnitTest :snitch:assembleRelease   # needs the Android SDK
-./gradlew -p logic-jvm test                                    # pure logic vs contract/vectors, JVM only
+./gradlew :snitch:testDebugUnitTest :snitch:assembleRelease
+./gradlew -p logic-jvm test
 ```
+
+The first command needs the Android SDK. The second runs the pure logic against `contract/vectors` on a plain JVM.

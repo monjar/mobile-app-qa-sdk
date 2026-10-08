@@ -22,10 +22,10 @@ them and escalates to **GitHub issues, email, Slack, Discord or any webhook**, w
 ```sh
 docker run -d --name snitch -p 8080:8080 -v snitch-data:/data \
   -e SNITCH_PUBLIC_URL=https://snitch.example.com ghcr.io/monjar/snitch-server:latest
-docker logs snitch | grep setup    # one-time link to create the first admin
+docker logs snitch | grep setup
 ```
 
-Then create a project in the dashboard and copy its ingest key.
+The log line is a one-time link to create the first admin. Then create a project in the dashboard and copy its ingest key.
 
 **2. Add the SDK**
 
@@ -80,12 +80,16 @@ scripts/        fake SDK client, CI helpers, packaging checks
 
 ```sh
 npm ci
-npm test                 # contract + server
-npm run build            # dashboard + server bundle
-npm run dev -w server    # API on :8080   (SNITCH_DATA_DIR=./data)
-npm run dev -w dashboard # dashboard on :5173, proxied to :8080
-node scripts/fake-sdk.mjs --key snitch_pk_… --generate-media 5   # send a report like a device would
+npm test
+npm run build
+npm run dev -w server
+npm run dev -w dashboard
+node scripts/fake-sdk.mjs --key snitch_pk_… --generate-media 5
 ```
+
+`npm test` runs the contract and server tests, and `npm run build` builds the dashboard and the server bundle. The dev
+server serves the API on :8080 (data in `SNITCH_DATA_DIR`, default `./data`), and the dashboard dev server runs on
+:5173, proxied to :8080. `fake-sdk.mjs` sends a report the way a device would.
 
 Native code is built and tested in GitHub Actions (`ios.yml`, `android.yml`, `rn.yml`). The Kotlin pure logic also runs
 on a plain JVM: `gradle -p android/logic-jvm test`.
