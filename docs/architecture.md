@@ -29,7 +29,7 @@ A behaviour change starts with a vector.
 ## Reporting flow
 
 1. **Trigger.** The detector watches touches passively, without swizzling: a gesture recognizer per window on iOS,
-   a `Window.Callback` wrapper on Android. Three fingers that land within 150 ms and stay still for 250 ms fire it,
+   a `Window.Callback` wrapper on Android. Three fingers that land within 250 ms and stay still for 250 ms fire it,
    within 400 ms of the first touch, so before the usual 500 ms long-press timers run out. At that moment the SDK:
    - takes the screenshot,
    - freezes the frame ring at the first touch (so the gesture isn't in the clip),

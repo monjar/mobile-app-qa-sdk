@@ -80,8 +80,12 @@ Classifiers are pure functions; vectors in `contract/vectors/release-type.json`.
   exists. (Deprecated API; call it through `Bundle.main.value(forKey:)` /
   `perform` to avoid the deprecation warning, or `@available` shims.)
 - `appTransactionEnvironment`: only if nothing above decided, on iOS 16+,
-  `AppTransaction.shared` in a detached task with a 3 s timeout. Until it
-  answers the type is `unknown` (inert); if it answers, re-evaluate.
+  `AppTransaction.shared` in a detached task, with no timeout: a slow answer
+  is still used. A failed read (offline at launch) is retried after about 5,
+  15 and 45 s. Until it answers the type is `unknown` (inert); when it
+  answers, re-evaluate. TestFlight installs usually have no receipt file, so
+  this is what decides `testflight`. The answer is never cached across
+  launches: the same build can later come from the App Store.
 
 **Android signals**: `ApplicationInfo.FLAG_DEBUGGABLE`; installer from
 `getInstallSourceInfo(pkg).installingPackageName` (API 30+) or
@@ -96,7 +100,7 @@ logging one info line. Nothing is installed, no network traffic happens.
 
 Pure detector `ThreeFingerHoldDetector` — line-for-line twin of
 `contract/src/logic/detector.ts`, vectors `contract/vectors/gesture.json`.
-Defaults: 3 pointers, 150 ms landing window, 250 ms hold, 10 pt/dp slop,
+Defaults: 3 pointers, 250 ms landing window, 250 ms hold, 10 pt/dp slop,
 1000 ms cooldown. Disabled while VoiceOver / TalkBack is on, while the Snitch
 sheet is visible, and while remote config says disabled.
 

@@ -78,8 +78,11 @@ Masked in every frame and in the screenshot (grey box): editable `UITextField`,
 Detected at runtime: simulator or development profile → `debug`; ad-hoc profile
 with devices → `adhoc`; `ProvisionsAllDevices` → `enterprise`; sandbox receipt →
 `testflight`; production receipt → `appstore`. On iOS 16+ StoreKit's
-`AppTransaction` decides when nothing else does (3 s timeout). Anything
-ambiguous is `unknown`, which is never enabled.
+`AppTransaction` decides when nothing else does. That is the usual case on
+TestFlight, which normally installs no receipt: Snitch waits for StoreKit's
+answer however long it takes and retries a failed read a few times, so it can
+switch on a few seconds after launch. Anything ambiguous is `unknown`, which
+is never enabled; if it stays unknown, Snitch logs a warning.
 
 ## System capture mode
 

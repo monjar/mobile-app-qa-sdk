@@ -5,7 +5,7 @@
 // Times are milliseconds on a monotonic clock, coordinates are points.
 //
 // Rules, with the defaults:
-// - exactly `pointers` (3) touches, every one landing within `landingWindowMs` (150) of the first
+// - exactly `pointers` (3) touches, every one landing within `landingWindowMs` (250) of the first
 // - none moving more than `slop` (10 pt) from where it landed
 // - fires once `holdMs` (250) has passed since the last finger landed
 // - any lift, a fourth finger, or too much movement fails the sequence until every finger is up
@@ -15,7 +15,7 @@ import Foundation
 
 struct DetectorConfig: Equatable {
     var pointers: Int = 3
-    var landingWindowMs: Double = 150
+    var landingWindowMs: Double = 250
     var holdMs: Double = 250
     var slop: Double = 10
     var cooldownMs: Double = 1000
