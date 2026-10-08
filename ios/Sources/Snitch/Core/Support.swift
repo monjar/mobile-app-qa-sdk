@@ -5,7 +5,7 @@ import Foundation
 import QuartzCore
 
 enum SnitchVersion {
-    static let current = "0.1.0"
+    static let current = "0.1.1"
     static let sdkName = "snitch-ios"
 }
 
