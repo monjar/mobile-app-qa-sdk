@@ -6,8 +6,18 @@
 //   so we cut out the `<?xml … </plist>` byte range instead of verifying the CMS
 // - App Store receipt file name (sandboxReceipt / receipt), read via KVC because
 //   `appStoreReceiptURL` is deprecated
-// - StoreKit 2 AppTransaction (iOS 16+), only when nothing else decided, with a
-//   3 s timeout; until it answers the type is `unknown` and the SDK stays inert
+// - StoreKit 2 AppTransaction (iOS 16+), only when nothing else decided; until it
+//   answers the type is `unknown` and the SDK stays inert
+//
+// TestFlight installs usually have NO receipt file (Apple only installs one for
+// production App Store downloads, or after a sandbox purchase), so on TestFlight
+// AppTransaction is the deciding signal. It can take several seconds on a cold
+// launch and throws while offline. It used to get one try with a 3 s timeout and
+// a late answer was dropped, which left TestFlight builds silently inert. Now a
+// late answer is used whenever it arrives, and a failed read is retried
+// (AppTransactionRetry). The answer is deliberately not cached across launches:
+// the same build number can later be installed from the App Store, and a stale
+// "sandbox" must never switch Snitch on there.
 
 import Foundation
 import StoreKit
@@ -62,39 +72,37 @@ enum ReleaseTypeDetector {
     }
 
     /// Detects the release type. `completion` is called on the main thread once with the
-    /// synchronous answer, and possibly a second time when AppTransaction refines `unknown`.
+    /// synchronous answer, and possibly a second time when AppTransaction refines `unknown`
+    /// (however long that takes; see AppTransactionRetry).
     static func detect(bundle: Bundle = .main, completion: @escaping (SnitchReleaseType) -> Void) {
         let signals = collectSignals(bundle: bundle)
         let first = ReleaseTypeClassifier.classifyIos(signals)
         completion(first)
         guard ReleaseTypeClassifier.awaitsAppTransaction(signals) else { return }
         if #available(iOS 16.0, *) {
-            readAppTransactionEnvironment(timeout: 3) { env in
-                guard let env = env else { return }
+            let started = Date()
+            AppTransactionRetry.run(
+                read: { done in readAppTransactionEnvironment(completion: done) },
+                schedule: { delay, work in DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work) }
+            ) { env in
+                guard let env = env else {
+                    SDKLog.warn("Snitch is inactive: no provisioning profile or receipt, and StoreKit's AppTransaction could not be read after \(AppTransactionRetry.defaultDelays.count) attempts")
+                    return
+                }
                 var refined = signals
                 refined.appTransactionEnvironment = env
                 let type = ReleaseTypeClassifier.classifyIos(refined)
+                let seconds = String(format: "%.1f", Date().timeIntervalSince(started))
+                SDKLog.info("Release type \(type.rawValue) from AppTransaction (\(env)) after \(seconds) s")
                 if type != first { completion(type) }
             }
         }
     }
 
     /// Calls `completion` on the main thread with "sandbox" / "production" / "xcode", or nil
-    /// on error or after `timeout` seconds (a late answer is ignored).
+    /// when AppTransaction could not be read. No timeout: a slow answer is still an answer.
     @available(iOS 16.0, *)
-    private static func readAppTransactionEnvironment(timeout: TimeInterval, completion: @escaping (String?) -> Void) {
-        let done = Locked(false)
-        let finish: (String?) -> Void = { value in
-            DispatchQueue.main.async {
-                let first = done.mutate { (d: inout Bool) -> Bool in
-                    if d { return false }
-                    d = true
-                    return true
-                }
-                if first { completion(value) }
-            }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { finish(nil) }
+    private static func readAppTransactionEnvironment(completion: @escaping (String?) -> Void) {
         Task.detached(priority: .utility) {
             var env: String?
             do {
@@ -117,7 +125,36 @@ enum ReleaseTypeDetector {
             } catch {
                 env = nil
             }
-            finish(env)
+            DispatchQueue.main.async { completion(env) }
         }
+    }
+}
+
+/// Reads AppTransaction's environment until it answers: one read now, then a retry after
+/// each delay in `delays` while reads fail (nil). Calls `completion` exactly once, with the
+/// first answer, or nil when every attempt failed. Pure apart from the injected reader and
+/// scheduler, so it is unit-tested without StoreKit.
+enum AppTransactionRetry {
+    /// Waits before each attempt: the first read is immediate, then about 5 s, 15 s and 45 s.
+    static let defaultDelays: [TimeInterval] = [0, 5, 15, 45]
+
+    static func run(
+        delays: [TimeInterval] = defaultDelays,
+        read: @escaping (@escaping (String?) -> Void) -> Void,
+        schedule: @escaping (TimeInterval, @escaping () -> Void) -> Void,
+        completion: @escaping (String?) -> Void
+    ) {
+        func attempt(_ i: Int) {
+            guard i < delays.count else {
+                completion(nil)
+                return
+            }
+            schedule(delays[i]) {
+                read { env in
+                    if let env = env { completion(env) } else { attempt(i + 1) }
+                }
+            }
+        }
+        attempt(0)
     }
 }
