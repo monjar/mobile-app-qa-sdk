@@ -2,7 +2,7 @@
  "description": "ThreeFingerHoldDetector vectors. Feed events in order to a detector built from DEFAULT_DETECTOR_CONFIG merged with `config`; `fires` lists the t of every event on which handle() returned true.",
  "defaults": {
   "pointers": 3,
-  "landingWindowMs": 150,
+  "landingWindowMs": 250,
   "holdMs": 250,
   "slop": 10,
   "cooldownMs": 1000,
@@ -69,14 +69,14 @@
      "y": 100
     },
     {
-     "t": 80,
+     "t": 130,
      "type": "down",
      "id": 2,
      "x": 160,
      "y": 110
     },
     {
-     "t": 160,
+     "t": 260,
      "type": "down",
      "id": 3,
      "x": 220,
@@ -108,30 +108,67 @@
      "y": 100
     },
     {
-     "t": 75,
+     "t": 125,
      "type": "down",
      "id": 2,
      "x": 160,
      "y": 110
     },
     {
-     "t": 150,
+     "t": 250,
      "type": "down",
      "id": 3,
      "x": 220,
      "y": 120
     },
     {
-     "t": 399,
+     "t": 499,
      "type": "tick"
     },
     {
-     "t": 400,
+     "t": 500,
      "type": "tick"
     }
    ],
    "fires": [
-    400
+    500
+   ]
+  },
+  {
+   "name": "fingers landing one after another, 100 ms apart, still arm",
+   "events": [
+    {
+     "t": 0,
+     "type": "down",
+     "id": 1,
+     "x": 100,
+     "y": 100
+    },
+    {
+     "t": 100,
+     "type": "down",
+     "id": 2,
+     "x": 160,
+     "y": 110
+    },
+    {
+     "t": 200,
+     "type": "down",
+     "id": 3,
+     "x": 220,
+     "y": 120
+    },
+    {
+     "t": 449,
+     "type": "tick"
+    },
+    {
+     "t": 450,
+     "type": "tick"
+    }
+   ],
+   "fires": [
+    450
    ]
   },
   {

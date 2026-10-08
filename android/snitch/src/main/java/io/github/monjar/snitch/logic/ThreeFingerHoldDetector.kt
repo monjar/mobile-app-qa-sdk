@@ -8,10 +8,10 @@
  * coordinates in dp.
  *
  * Rules, with the defaults:
- * - exactly `pointers` (3) touches, every one landing within `landingWindowMs` (150) of the first
+ * - exactly `pointers` (3) touches, every one landing within `landingWindowMs` (250) of the first
  * - none moving more than `slop` (10 dp) from where it landed
  * - fires once `holdMs` (250) has passed since the last finger landed, so at most
- *   landingWindowMs + holdMs (400 ms) after the first touch — ahead of the 500 ms
+ *   landingWindowMs + holdMs (500 ms) after the first touch — no later than the 500 ms
  *   default long-press most apps use
  * - any lift, a fourth finger, or too much movement fails the sequence until every finger is up
  * - one fire per sequence, and none within `cooldownMs` (1000) of the previous fire
@@ -20,7 +20,7 @@ package io.github.monjar.snitch.logic
 
 data class DetectorConfig(
     val pointers: Int = 3,
-    val landingWindowMs: Long = 150,
+    val landingWindowMs: Long = 250,
     val holdMs: Long = 250,
     val slop: Double = 10.0,
     val cooldownMs: Long = 1000,
