@@ -10,8 +10,10 @@ docker run -d --name snitch -p 8080:8080 -v snitch-data:/data \
   -e SNITCH_PUBLIC_URL=https://snitch.example.com \
   ghcr.io/monjar/snitch-server:latest
 
-docker logs snitch | grep setup   # open the one-time link to create the first admin
+docker logs snitch | grep setup
 ```
+
+Open the one-time link from that log line to create the first admin.
 
 Then, in the dashboard: **New project** → copy the ingest key → follow the **Install** tab for your platform.
 

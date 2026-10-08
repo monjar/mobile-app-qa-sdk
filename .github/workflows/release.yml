@@ -2,7 +2,9 @@ name: release
 
 # Cuts a release from a v* tag (or a manual dry run):
 #   - checks VERSION, the tag and every package version agree
-#   - publishes react-native-snitch to npm (needs the NPM_TOKEN repository secret)
+#   - publishes react-native-snitch to npm through npm trusted publishing (OIDC: configure
+#     monjar/mobile-app-qa-sdk + release.yml as the package's trusted publisher on npmjs.com).
+#     An NPM_TOKEN repository secret still works as a fallback.
 #   - creates a GitHub Release with the npm tarball attached
 # The Docker image is published by docker.yml on the same tag; SwiftPM and
 # JitPack resolve straight from the tag.
@@ -46,9 +48,11 @@ jobs:
         if: github.ref_type == 'tag' || inputs.dry_run == false
         working-directory: react-native
         env:
+          # Empty unless the fallback secret exists; trusted publishing needs no token.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          if [ -z "$NODE_AUTH_TOKEN" ]; then echo "::error::Add an NPM_TOKEN repository secret (an npm automation token) to publish."; exit 1; fi
+          npm install -g npm@latest   # trusted publishing needs npm >= 11.5.1
+          npm --version
           npm publish --access public --provenance
       - name: Dry run
         if: github.ref_type != 'tag' && inputs.dry_run != false
