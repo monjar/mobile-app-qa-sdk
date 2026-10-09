@@ -76,16 +76,20 @@ Classifiers are pure functions; vectors in `contract/vectors/release-type.json`.
   The file is CMS-signed; find the `<?xml` … `</plist>` byte range and parse it
   with `PropertyListSerialization`. Read `Entitlements.get-task-allow`,
   `ProvisionsAllDevices`, `ProvisionedDevices.count`.
-- `receipt`: `Bundle.main.appStoreReceiptURL?.lastPathComponent` if that file
-  exists. (Deprecated API; call it through `Bundle.main.value(forKey:)` /
-  `perform` to avoid the deprecation warning, or `@available` shims.)
+- `receipt`: `Bundle.main.appStoreReceiptURL?.lastPathComponent`, whether or
+  not the file exists: TestFlight installs point at `sandboxReceipt` but
+  usually have no file there. (Deprecated API; call it through
+  `Bundle.main.value(forKey:)` / `perform` to avoid the deprecation warning,
+  or `@available` shims.)
 - `appTransactionEnvironment`: only if nothing above decided, on iOS 16+,
   `AppTransaction.shared` in a detached task, with no timeout: a slow answer
   is still used. A failed read (offline at launch) is retried after about 5,
   15 and 45 s. Until it answers the type is `unknown` (inert); when it
-  answers, re-evaluate. TestFlight installs usually have no receipt file, so
-  this is what decides `testflight`. The answer is never cached across
-  launches: the same build can later come from the App Store.
+  answers, re-evaluate. Don't rely on it for TestFlight: there StoreKit often
+  can't create an AppTransaction at all ("Missing account token",
+  `SKInternalErrorDomain` 13, then throttled), which is why the receipt URL's
+  name decides first. The answer is never cached across launches: the same
+  build can later come from the App Store.
 
 **Android signals**: `ApplicationInfo.FLAG_DEBUGGABLE`; installer from
 `getInstallSourceInfo(pkg).installingPackageName` (API 30+) or

@@ -10,7 +10,7 @@ export interface IosSignals {
   isSimulator: boolean;
   /** Parsed embedded.mobileprovision, or null when the app has none (store-signed). */
   profile: { getTaskAllow: boolean; provisionsAllDevices: boolean; provisionedDeviceCount: number } | null;
-  /** Last path component of appStoreReceiptURL, if a receipt file exists. */
+  /** Last path component of appStoreReceiptURL, whether or not the file exists. */
   receipt: 'sandboxReceipt' | 'receipt' | null;
   /** StoreKit 2 AppTransaction.environment, when it could be read. */
   appTransactionEnvironment: 'sandbox' | 'production' | 'xcode' | null;
