@@ -1,7 +1,7 @@
 {
   "name": "snitch-monorepo",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Snitch \u2014 self-hosted QA and bug reporting for mobile apps.",
   "license": "MIT",
   "workspaces": [

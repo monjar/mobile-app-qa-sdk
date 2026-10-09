@@ -4,8 +4,12 @@
 // - simulator: compile-time
 // - embedded.mobileprovision: CMS-signed; we only need the XML plist inside it,
 //   so we cut out the `<?xml … </plist>` byte range instead of verifying the CMS
-// - App Store receipt file name (sandboxReceipt / receipt), read via KVC because
-//   `appStoreReceiptURL` is deprecated
+// - the App Store receipt URL's file name (sandboxReceipt / receipt), read via
+//   KVC because `appStoreReceiptURL` is deprecated. The NAME is the signal, not
+//   the file: a TestFlight install points at …/StoreKit/sandboxReceipt but
+//   usually has no file there, and StoreKit can't always mint an AppTransaction
+//   either ("Missing account token", SKInternalErrorDomain 13, then throttled).
+//   Requiring the file left TestFlight builds inert.
 // - StoreKit 2 AppTransaction (iOS 16+), only when nothing else decided; until it
 //   answers the type is `unknown` and the SDK stays inert
 //
@@ -59,16 +63,21 @@ enum ReleaseTypeDetector {
             }
         }
 
-        var receipt: String?
+        var receiptURL: URL?
         // KVC raises on unknown keys, so check the selector first in case a future SDK drops it.
-        if bundle.responds(to: NSSelectorFromString("appStoreReceiptURL")),
-           let url = bundle.value(forKey: "appStoreReceiptURL") as? URL,
-           FileManager.default.fileExists(atPath: url.path) {
-            let name = url.lastPathComponent
-            if name == "sandboxReceipt" || name == "receipt" { receipt = name }
+        if bundle.responds(to: NSSelectorFromString("appStoreReceiptURL")) {
+            receiptURL = bundle.value(forKey: "appStoreReceiptURL") as? URL
         }
+        let receipt = receiptName(of: receiptURL)
 
         return IosReleaseSignals(isSimulator: isSimulator, profile: profile, receipt: receipt, appTransactionEnvironment: nil)
+    }
+
+    /// "sandboxReceipt" or "receipt" from the receipt URL's last path component, whether
+    /// or not the file exists yet; nil for anything else.
+    static func receiptName(of url: URL?) -> String? {
+        guard let name = url?.lastPathComponent else { return nil }
+        return name == "sandboxReceipt" || name == "receipt" ? name : nil
     }
 
     /// Detects the release type. `completion` is called on the main thread once with the

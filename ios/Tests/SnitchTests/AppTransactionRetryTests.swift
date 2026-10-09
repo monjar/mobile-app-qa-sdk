@@ -72,3 +72,46 @@ final class AppTransactionRetryTests: XCTestCase {
         XCTAssertEqual(ReleaseTypeClassifier.classifyIos(s), .testflight)
     }
 }
+
+/// The receipt URL's name decides TestFlight vs App Store, whether or not the file exists:
+/// TestFlight points at …/StoreKit/sandboxReceipt but usually has no file there, and
+/// StoreKit can fail to create an AppTransaction ("Missing account token").
+final class ReceiptNameTests: XCTestCase {
+    private let missingDir = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("snitch-no-receipt-\(UUID().uuidString)/StoreKit")
+
+    func testSandboxReceiptNameCountsWithoutAFile() {
+        let url = missingDir.appendingPathComponent("sandboxReceipt")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        XCTAssertEqual(ReleaseTypeDetector.receiptName(of: url), "sandboxReceipt")
+    }
+
+    func testProductionReceiptName() {
+        XCTAssertEqual(ReleaseTypeDetector.receiptName(of: missingDir.appendingPathComponent("receipt")), "receipt")
+    }
+
+    func testAnythingElseIsNoSignal() {
+        XCTAssertNil(ReleaseTypeDetector.receiptName(of: nil))
+        XCTAssertNil(ReleaseTypeDetector.receiptName(of: missingDir.appendingPathComponent("other")))
+    }
+
+    func testATestFlightInstallWithNoFileAndNoAppTransactionIsTestFlight() {
+        // No profile, sandboxReceipt URL with no file, AppTransaction failing: was `unknown`.
+        let s = IosReleaseSignals(
+            isSimulator: false, profile: nil,
+            receipt: ReleaseTypeDetector.receiptName(of: missingDir.appendingPathComponent("sandboxReceipt")),
+            appTransactionEnvironment: nil
+        )
+        XCTAssertEqual(ReleaseTypeClassifier.classifyIos(s), .testflight)
+        XCTAssertFalse(ReleaseTypeClassifier.awaitsAppTransaction(s), "decided without StoreKit")
+    }
+
+    func testDevelopmentProfileStillWinsOverTheReceiptName() {
+        let s = IosReleaseSignals(
+            isSimulator: false,
+            profile: ProvisioningProfileSignals(getTaskAllow: true, provisionsAllDevices: false, provisionedDeviceCount: 1),
+            receipt: "sandboxReceipt", appTransactionEnvironment: nil
+        )
+        XCTAssertEqual(ReleaseTypeClassifier.classifyIos(s), .debug)
+    }
+}

@@ -76,13 +76,13 @@ Masked in every frame and in the screenshot (grey box): editable `UITextField`,
 ## Release types
 
 Detected at runtime: simulator or development profile → `debug`; ad-hoc profile
-with devices → `adhoc`; `ProvisionsAllDevices` → `enterprise`; sandbox receipt →
-`testflight`; production receipt → `appstore`. On iOS 16+ StoreKit's
-`AppTransaction` decides when nothing else does. That is the usual case on
-TestFlight, which normally installs no receipt: Snitch waits for StoreKit's
-answer however long it takes and retries a failed read a few times, so it can
-switch on a few seconds after launch. Anything ambiguous is `unknown`, which
-is never enabled; if it stays unknown, Snitch logs a warning.
+with devices → `adhoc`; `ProvisionsAllDevices` → `enterprise`; sandbox receipt
+URL → `testflight`; production receipt URL → `appstore`. The receipt URL's
+name is what counts, not the file: TestFlight points at `sandboxReceipt` but
+usually installs no file there. On iOS 16+ StoreKit's `AppTransaction` decides
+when nothing else does; Snitch waits for it however long it takes and retries
+a failed read a few times. Anything ambiguous is `unknown`, which is never
+enabled; if it stays unknown, Snitch logs a warning.
 
 ## System capture mode
 
