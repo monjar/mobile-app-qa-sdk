@@ -1,6 +1,6 @@
 {
   "name": "react-native-snitch",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Snitch for React Native and Expo: testers hold three fingers on the screen to send a bug report with a screenshot and the last seconds of screen video to your own server.",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",

@@ -1,7 +1,7 @@
 {
   "name": "@snitch/contract",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Wire contract shared by the Snitch server, dashboard and SDK tests: zod schemas, fixtures and test vectors.",
   "license": "MIT",
   "type": "module",
