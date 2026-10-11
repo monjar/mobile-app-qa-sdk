@@ -16,6 +16,11 @@ describe('applyIosInfoPlist', () => {
     });
   });
 
+  it('writes the edge handle options', () => {
+    const out = applyIosInfoPlist({}, resolve({ gesture: 'edgeHandle', edgeHandleSide: 'left', edgeHandlePosition: 0.4, edgeHandleColor: '00E5DB' }));
+    expect(out.Snitch).toMatchObject({ Gesture: 'edgeHandle', EdgeHandleSide: 'left', EdgeHandlePosition: 0.4, EdgeHandleColor: '#00E5DB' });
+  });
+
   it('writes every option with the spec §2.1 key names and types, in spec order', () => {
     const out = applyIosInfoPlist(
       {},

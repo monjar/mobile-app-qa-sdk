@@ -1,6 +1,7 @@
 // Snitch's own windows (spec §6): the report sheet, the toast, the screenshot
-// pill and the tester notice each live in a dedicated, scene-aware UIWindow above
-// the app (`.alert + 1`/`+ 2`). Recognizers and capture skip every SnitchWindow.
+// pill, the tester notice and the edge handle each live in a dedicated,
+// scene-aware UIWindow above the app (`.alert + 0.5`/`+ 1`/`+ 2`). Recognizers
+// and capture skip every SnitchWindow.
 //
 // Passthrough windows let touches that miss their content fall through to the
 // app, so a toast or pill never blocks it. Root view controllers defer status
@@ -54,6 +55,9 @@ final class OverlayController {
     private var pillWindow: SnitchWindow?
     private var pillHide: DispatchWorkItem?
     private var noticeWindow: SnitchWindow?
+    private var edgeHandleWindow: SnitchWindow?
+    /// What the current edge handle was built with, so an unchanged config isn't rebuilt mid-pull.
+    private var edgeHandleKey: String?
 
     /// Called on main whenever the sheet appears or disappears.
     var onSheetVisibilityChange: ((Bool) -> Void)?
@@ -228,10 +232,52 @@ final class OverlayController {
         noticeWindow = nil
     }
 
+    // MARK: - Edge handle
+
+    /// Shows the edge handle (idempotent for the same side/position/color). It sits just above
+    /// the app and below the sheet, in a passthrough window: only its narrow strip takes touches.
+    func showEdgeHandle(side: EdgeHandleSide, position: Double, colorHex: String?, onPull: @escaping () -> Void) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        let key = "\(side.rawValue)|\(position)|\(colorHex ?? "")"
+        if edgeHandleWindow != nil, edgeHandleKey == key { return }
+        hideEdgeHandle()
+        guard let made = makeWindow(levelOffset: 0.5, passthrough: true) else { return }
+        let window = made.window
+        let root = made.root
+        let handle = EdgeHandleView(side: side, color: EdgeHandleView.color(hex: colorHex), onPull: onPull)
+        handle.translatesAutoresizingMaskIntoConstraints = false
+        root.view.addSubview(handle)
+        let guide = root.view.safeAreaLayoutGuide
+        NSLayoutConstraint.activate([
+            side == .right
+                ? handle.trailingAnchor.constraint(equalTo: guide.trailingAnchor)
+                : handle.leadingAnchor.constraint(equalTo: guide.leadingAnchor),
+            handle.widthAnchor.constraint(equalToConstant: EdgeHandleView.hitSize.width),
+            handle.heightAnchor.constraint(equalToConstant: EdgeHandleView.hitSize.height),
+            // Centre at `position` of the screen height.
+            NSLayoutConstraint(
+                item: handle, attribute: .centerY, relatedBy: .equal,
+                toItem: root.view, attribute: .bottom,
+                multiplier: CGFloat(EdgeHandleGeometry.clampPosition(position)), constant: 0
+            ),
+        ])
+        window.isHidden = false
+        edgeHandleWindow = window
+        edgeHandleKey = key
+    }
+
+    func hideEdgeHandle() {
+        edgeHandleWindow?.isHidden = true
+        edgeHandleWindow?.rootViewController = nil
+        edgeHandleWindow = nil
+        edgeHandleKey = nil
+    }
+
     func hideAll() {
         dismissSheet()
         hideToast()
         hidePill()
         hideNotice()
+        hideEdgeHandle()
     }
 }

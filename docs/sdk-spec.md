@@ -33,7 +33,10 @@ package `io.github.monjar.snitch`, npm `react-native-snitch`.
 | Server base URL | `ServerURL` | `io.github.monjar.snitch.SERVER_URL` | string | — (required) |
 | Ingest key | `IngestKey` | `io.github.monjar.snitch.INGEST_KEY` | string | — (required) |
 | Release types the SDK runs in | `EnabledReleaseTypes` (array) | `io.github.monjar.snitch.ENABLED_RELEASE_TYPES` (comma-separated) | list | `debug, adhoc, enterprise, testflight, internal` |
-| Trigger gesture | `Gesture` | `io.github.monjar.snitch.GESTURE` | `threeFingerHold` \| `shake` \| `both` \| `none` | `threeFingerHold` |
+| Trigger gesture | `Gesture` | `io.github.monjar.snitch.GESTURE` | `threeFingerHold` \| `shake` \| `both` \| `none` \| `edgeHandle` (iOS only so far) | `threeFingerHold` |
+| Edge handle side | `EdgeHandleSide` | — | `right` \| `left` | `right` |
+| Edge handle position | `EdgeHandlePosition` | — | 0.1–0.9 (fraction of the screen height) | 0.33 |
+| Edge handle tint | `EdgeHandleColor` | — | `#RRGGBB` \| `#RRGGBBAA` | system tint |
 | "Report this?" after a system screenshot | `ScreenshotPrompt` | `io.github.monjar.snitch.SCREENSHOT_PROMPT` | bool | true (Android: only effective on API 34+ with the permission) |
 | Mask editable text inputs | `MaskTextInputs` | `io.github.monjar.snitch.MASK_TEXT_INPUTS` | bool | true |
 | Video source | `CaptureMode` | `io.github.monjar.snitch.CAPTURE_MODE` | `snapshot` \| `system` \| `off` | `snapshot` |
@@ -165,7 +168,27 @@ the library does **not** declare; the app opts in). On a screenshot, show a
 pill at the top: "Report this screen?" for 4 s; tapping it opens the sheet with
 `trigger = screenshot` and a fresh screenshot (the system one isn't readable).
 
-### 4.4 Programmatic
+### 4.4 Edge handle (optional, iOS)
+
+`Gesture = edgeHandle`: a faded tab (5×56 pt, 35% opacity, the `EdgeHandleColor`
+tint) hugging the `EdgeHandleSide` edge, centred at `EdgeHandlePosition` of the
+screen height. Unlike a gesture it is visible, so testers need no explaining.
+
+- It lives in its own passthrough `SnitchWindow` at `.alert + 0.5`: above the
+  app's screens and modals, below the report sheet. Only its 22×88 pt strip
+  takes touches; screenshots and video skip it like all Snitch UI.
+- A drag away from the edge moves the tab with the finger (up to 72 pt) and
+  brightens it. Released at 44 pt or more, it opens the sheet; less, it springs
+  back. Only a mostly horizontal drag away from the edge claims the touch, so a
+  tap or a vertical swipe near the edge does nothing.
+- Shown while the SDK is on, the app is active and no sheet is up.
+- VoiceOver: a "Report a problem" button; activating it opens the sheet.
+- Reports opened from it carry `trigger: "gesture"` (the contract's trigger
+  list predates the handle, and existing servers would reject a new value).
+
+Android: not yet implemented; the config plugin keeps `threeFingerHold` there.
+
+### 4.5 Programmatic
 
 `Snitch.show(type:)` opens the sheet (trigger `api`). Works whenever the SDK is enabled.
 

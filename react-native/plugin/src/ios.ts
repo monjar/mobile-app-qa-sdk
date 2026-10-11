@@ -14,6 +14,9 @@ export interface SnitchInfoPlistDict {
   CaptureMode?: string;
   VideoMaxSeconds?: number;
   ShowTesterNotice?: boolean;
+  EdgeHandleSide?: string;
+  EdgeHandlePosition?: number;
+  EdgeHandleColor?: string;
 }
 
 /** The `Snitch` dictionary for these options; keys the app didn't set are omitted. */
@@ -30,6 +33,9 @@ export function buildInfoPlistDict(options: SnitchResolvedOptions): SnitchInfoPl
   if (options.captureMode !== undefined) dict.CaptureMode = options.captureMode;
   if (options.videoMaxSeconds !== undefined) dict.VideoMaxSeconds = options.videoMaxSeconds;
   if (options.showTesterNotice !== undefined) dict.ShowTesterNotice = options.showTesterNotice;
+  if (options.edgeHandleSide !== undefined) dict.EdgeHandleSide = options.edgeHandleSide;
+  if (options.edgeHandlePosition !== undefined) dict.EdgeHandlePosition = options.edgeHandlePosition;
+  if (options.edgeHandleColor !== undefined) dict.EdgeHandleColor = options.edgeHandleColor;
   return dict;
 }
 

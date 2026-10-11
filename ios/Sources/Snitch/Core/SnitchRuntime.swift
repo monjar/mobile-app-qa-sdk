@@ -180,6 +180,21 @@ final class SnitchRuntime: WindowTouchRecognizerHost {
             && (gesture == .shake || (gesture == .both && releaseType != .debug))
         if wantsShake { shake.start() } else { shake.stop() }
 
+        // The edge handle: shown while Snitch is on, the app is in front and no sheet is up.
+        // It reports as trigger "gesture" (the contract's trigger list predates it, and older
+        // servers would reject a new value).
+        if on && appActive && !overlay.isSheetVisible && gesture == .edgeHandle {
+            overlay.showEdgeHandle(
+                side: effective.edgeHandleSide,
+                position: effective.edgeHandlePosition,
+                colorHex: effective.edgeHandleColor
+            ) { [weak self] in
+                self?.openSheet(trigger: "gesture", type: nil)
+            }
+        } else {
+            overlay.hideEdgeHandle()
+        }
+
         if on && effective.screenshotPrompt { screenshotObserver.start() } else {
             screenshotObserver.stop()
             overlay.hidePill()

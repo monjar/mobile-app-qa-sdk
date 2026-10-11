@@ -72,6 +72,23 @@ struct StaticConfig {
         }
         if let n = int(value("VideoMaxSeconds")) { options.videoMaxSeconds = n.clamped(1, 30) }
         if let b = bool(value("ShowTesterNotice")) { options.showTesterNotice = b }
+        if let s = value("EdgeHandleSide") as? String {
+            if let side = EdgeHandleSide(rawValue: s) {
+                options.edgeHandleSide = side
+            } else {
+                SDKLog.once("config.edgeHandleSide", "Unknown EdgeHandleSide \"\(s)\"; using right")
+            }
+        }
+        if let n = value("EdgeHandlePosition") as? NSNumber {
+            options.edgeHandlePosition = EdgeHandleGeometry.clampPosition(n.doubleValue)
+        }
+        if let s = value("EdgeHandleColor") as? String {
+            if EdgeHandleGeometry.isValidHexColor(s) {
+                options.edgeHandleColor = s
+            } else {
+                SDKLog.once("config.edgeHandleColor", "EdgeHandleColor \"\(s)\" is not #RRGGBB or #RRGGBBAA; using the system tint")
+            }
+        }
 
         let urlString = (value("ServerURL") as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
         let key = (value("IngestKey") as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)

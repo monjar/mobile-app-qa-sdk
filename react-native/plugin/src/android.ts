@@ -45,7 +45,9 @@ export function buildMetaData(options: SnitchResolvedOptions): [name: string, va
   put(META_DATA.serverUrl, options.serverUrl);
   put(META_DATA.ingestKey, options.ingestKey);
   put(META_DATA.enabledReleaseTypes, options.enabledReleaseTypes?.join(','));
-  put(META_DATA.gesture, options.gesture);
+  // The edge handle is iOS-only so far; Android keeps its default trigger rather than
+  // receiving a value it doesn't know.
+  put(META_DATA.gesture, options.gesture === 'edgeHandle' ? 'threeFingerHold' : options.gesture);
   put(META_DATA.screenshotPrompt, options.screenshotPrompt);
   put(META_DATA.maskTextInputs, options.maskTextInputs);
   put(META_DATA.captureMode, options.captureMode);

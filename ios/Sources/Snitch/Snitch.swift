@@ -32,6 +32,15 @@ public enum Gesture: String, CaseIterable {
     case both
     /// No gesture; open the sheet with `Snitch.show()`.
     case none
+    /// A faded tab on the screen edge that testers pull to open the sheet. Visible, so
+    /// it needs no explaining; see `edgeHandleSide`, `edgeHandlePosition`, `edgeHandleColor`.
+    case edgeHandle
+}
+
+/// Which screen edge the edge handle sits on.
+public enum EdgeHandleSide: String, CaseIterable {
+    case right
+    case left
 }
 
 /// Where the video frames come from.
@@ -54,6 +63,12 @@ public struct SnitchOptions {
     /// Longest clip offered, clamped to 1...30.
     public var videoMaxSeconds: Int
     public var showTesterNotice: Bool
+    /// Edge for `Gesture.edgeHandle`. Default right (clear of the system back swipe).
+    public var edgeHandleSide: EdgeHandleSide
+    /// Vertical centre of the edge handle as a fraction of the screen height, clamped to 0.1...0.9.
+    public var edgeHandlePosition: Double
+    /// Edge handle tint as "#RRGGBB" or "#RRGGBBAA"; nil uses the system tint.
+    public var edgeHandleColor: String?
 
     public init(
         enabledReleaseTypes: Set<SnitchReleaseType> = [.debug, .adhoc, .enterprise, .testflight, .`internal`],
@@ -62,7 +77,10 @@ public struct SnitchOptions {
         maskTextInputs: Bool = true,
         captureMode: CaptureMode = .snapshot,
         videoMaxSeconds: Int = 30,
-        showTesterNotice: Bool = true
+        showTesterNotice: Bool = true,
+        edgeHandleSide: EdgeHandleSide = .right,
+        edgeHandlePosition: Double = 0.33,
+        edgeHandleColor: String? = nil
     ) {
         self.enabledReleaseTypes = enabledReleaseTypes
         self.gesture = gesture
@@ -71,6 +89,9 @@ public struct SnitchOptions {
         self.captureMode = captureMode
         self.videoMaxSeconds = min(max(videoMaxSeconds, 1), 30)
         self.showTesterNotice = showTesterNotice
+        self.edgeHandleSide = edgeHandleSide
+        self.edgeHandlePosition = EdgeHandleGeometry.clampPosition(edgeHandlePosition)
+        self.edgeHandleColor = EdgeHandleGeometry.isValidHexColor(edgeHandleColor) ? edgeHandleColor : nil
     }
 }
 

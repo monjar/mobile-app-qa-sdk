@@ -50,7 +50,10 @@ gesture, no capture, no network.
 | `SnitchOptions` | Info.plist key | Default | |
 |---|---|---|---|
 | `enabledReleaseTypes` | `EnabledReleaseTypes` (array) | debug, adhoc, enterprise, testflight, internal | where the SDK runs |
-| `gesture` | `Gesture` | `threeFingerHold` | `shake`, `both`, `none` |
+| `gesture` | `Gesture` | `threeFingerHold` | `shake`, `both`, `none`, `edgeHandle` |
+| `edgeHandleSide` | `EdgeHandleSide` | `right` | `left`; edge for `edgeHandle` |
+| `edgeHandlePosition` | `EdgeHandlePosition` | `0.33` | vertical centre, fraction of the screen height, 0.1–0.9 |
+| `edgeHandleColor` | `EdgeHandleColor` | system tint | `"#RRGGBB"` or `"#RRGGBBAA"` |
 | `screenshotPrompt` | `ScreenshotPrompt` | `true` | "Report this screen?" after a system screenshot |
 | `maskTextInputs` | `MaskTextInputs` | `true` | mask editable text fields in screenshots and video |
 | `captureMode` | `CaptureMode` | `snapshot` | `system` (ReplayKit) or `off` |
