@@ -144,9 +144,25 @@ describe('validateOptions', () => {
 
   it('rejects an unknown gesture and capture mode', () => {
     expect(problemsOf({ ...base, gesture: 'threeFingerTap', captureMode: 'replaykit' })).toEqual([
-      'gesture must be one of "threeFingerHold", "shake", "both", "none" (got "threeFingerTap").',
+      'gesture must be one of "threeFingerHold", "shake", "both", "none", "edgeHandle" (got "threeFingerTap").',
       'captureMode must be one of "snapshot", "system", "off" (got "replaykit").',
     ]);
+  });
+
+  describe('edge handle', () => {
+    it('accepts the gesture and its options', () => {
+      expect(problemsOf({ ...base, gesture: 'edgeHandle', edgeHandleSide: 'left', edgeHandlePosition: 0.5, edgeHandleColor: '#00E5DB' })).toEqual([]);
+    });
+
+    it('rejects a bad side, position or color', () => {
+      expect(
+        problemsOf({ ...base, gesture: 'edgeHandle', edgeHandleSide: 'top', edgeHandlePosition: 1.5, edgeHandleColor: 'teal' }),
+      ).toEqual([
+        'edgeHandleSide must be one of "right", "left" (got "top").',
+        'edgeHandlePosition must be a number from 0.1 to 0.9, a fraction of the screen height (got 1.5).',
+        'edgeHandleColor must be a hex color such as "#00E5DB" or "#00E5DB80" (got "teal").',
+      ]);
+    });
   });
 
   describe('videoMaxSeconds', () => {

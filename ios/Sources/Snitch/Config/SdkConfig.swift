@@ -88,6 +88,9 @@ struct EffectiveConfig: Equatable {
     var screenshotPrompt: Bool
     var gesture: Gesture
     var showTesterNotice: Bool
+    var edgeHandleSide: EdgeHandleSide
+    var edgeHandlePosition: Double
+    var edgeHandleColor: String?
     var ttlSeconds: Int
 
     var videoEnabled: Bool {
@@ -154,6 +157,9 @@ enum ConfigMerger {
             screenshotPrompt: prompt,
             gesture: options.gesture,
             showTesterNotice: options.showTesterNotice,
+            edgeHandleSide: options.edgeHandleSide,
+            edgeHandlePosition: options.edgeHandlePosition,
+            edgeHandleColor: options.edgeHandleColor,
             ttlSeconds: r.ttlSeconds.clamped(60, 86_400)
         )
     }

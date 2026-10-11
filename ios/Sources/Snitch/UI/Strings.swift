@@ -47,9 +47,13 @@ enum Strings {
             how = "Shake the device to report a problem."
         case Gesture.none:
             how = "Use the app's report option to report a problem."
+        case .edgeHandle:
+            how = "Pull the tab on the edge of the screen to report a problem."
         }
         return "This is a test build. \(how) The last \(seconds) seconds of screen activity stay on this device and are only sent with a report you submit."
     }
 
     static let gotIt = "Got it"
+    static let edgeHandleLabel = "Report a problem"
+    static let edgeHandleHint = "Pull, or activate, to report a problem with this screen"
 }

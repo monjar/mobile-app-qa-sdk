@@ -13,8 +13,13 @@ export type ReleaseType = (typeof RELEASE_TYPES)[number];
 export const ENABLEABLE_RELEASE_TYPES = RELEASE_TYPES.filter((t): t is Exclude<ReleaseType, 'unknown'> => t !== 'unknown');
 export type EnableableReleaseType = Exclude<ReleaseType, 'unknown'>;
 
-export const GESTURES = ['threeFingerHold', 'shake', 'both', 'none'] as const;
+export const GESTURES = ['threeFingerHold', 'shake', 'both', 'none', 'edgeHandle'] as const;
 export type Gesture = (typeof GESTURES)[number];
+
+export const EDGE_HANDLE_SIDES = ['right', 'left'] as const;
+export type EdgeHandleSide = (typeof EDGE_HANDLE_SIDES)[number];
+export const EDGE_HANDLE_POSITION_RANGE = { min: 0.1, max: 0.9 } as const;
+export const HEX_COLOR_PATTERN = /^#?(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/;
 
 export const CAPTURE_MODES = ['snapshot', 'system', 'off'] as const;
 export type CaptureMode = (typeof CAPTURE_MODES)[number];
@@ -37,8 +42,17 @@ export interface SnitchPluginProps {
   enabled?: boolean;
   /** Release types Snitch runs in. Default: debug, adhoc, enterprise, testflight, internal. */
   enabledReleaseTypes?: EnableableReleaseType[];
-  /** What opens the report sheet. Default threeFingerHold. */
+  /**
+   * What opens the report sheet. Default threeFingerHold. `edgeHandle` (iOS only for now)
+   * is a faded tab on the screen edge that testers pull; Android falls back to threeFingerHold.
+   */
   gesture?: Gesture;
+  /** Edge for the edge handle. Default right. */
+  edgeHandleSide?: EdgeHandleSide;
+  /** Vertical centre of the edge handle as a fraction of the screen height, 0.1–0.9. Default 0.33. */
+  edgeHandlePosition?: number;
+  /** Edge handle tint, "#RRGGBB" or "#RRGGBBAA". Default: the system tint. */
+  edgeHandleColor?: string;
   /** Offer "Report this screen?" after a system screenshot. Default true. */
   screenshotPrompt?: boolean;
   /** Black out editable text inputs in screenshots and video. Default true. */
@@ -67,6 +81,9 @@ export interface SnitchResolvedOptions {
   enabled?: boolean;
   enabledReleaseTypes?: EnableableReleaseType[];
   gesture?: Gesture;
+  edgeHandleSide?: EdgeHandleSide;
+  edgeHandlePosition?: number;
+  edgeHandleColor?: string;
   screenshotPrompt?: boolean;
   maskTextInputs?: boolean;
   captureMode?: CaptureMode;
@@ -91,6 +108,9 @@ const TOP_LEVEL_KEYS = [
   'captureMode',
   'videoMaxSeconds',
   'showTesterNotice',
+  'edgeHandleSide',
+  'edgeHandlePosition',
+  'edgeHandleColor',
   'android',
 ] as const;
 const ANDROID_KEYS = ['releaseType', 'detectScreenshots'] as const;
@@ -308,6 +328,25 @@ function parse(input: unknown, env: Env, requireConnection: boolean): ParseResul
   }
 
   options.showTesterNotice = readBoolean(input, 'showTesterNotice', '', problems);
+
+  options.edgeHandleSide = readEnum(input, 'edgeHandleSide', EDGE_HANDLE_SIDES, '', problems);
+  const position = input.edgeHandlePosition;
+  if (position !== undefined) {
+    const { min, max } = EDGE_HANDLE_POSITION_RANGE;
+    if (typeof position !== 'number' || !Number.isFinite(position) || position < min || position > max) {
+      problems.push(`edgeHandlePosition must be a number from ${min} to ${max}, a fraction of the screen height (got ${quote(position)}).`);
+    } else {
+      options.edgeHandlePosition = position;
+    }
+  }
+  const color = input.edgeHandleColor;
+  if (color !== undefined) {
+    if (typeof color !== 'string' || !HEX_COLOR_PATTERN.test(color)) {
+      problems.push(`edgeHandleColor must be a hex color such as "#00E5DB" or "#00E5DB80" (got ${quote(color)}).`);
+    } else {
+      options.edgeHandleColor = color.startsWith('#') ? color : `#${color}`;
+    }
+  }
 
   const android = input.android;
   if (android !== undefined) {

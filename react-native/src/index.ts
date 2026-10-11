@@ -18,7 +18,10 @@ import NativeSnitch, { type Spec } from './NativeSnitch';
 export type SnitchReleaseType = 'debug' | 'adhoc' | 'enterprise' | 'testflight' | 'appstore' | 'internal' | 'play' | 'unknown';
 
 /** What opens the report sheet. */
-export type SnitchGesture = 'threeFingerHold' | 'shake' | 'both' | 'none';
+export type SnitchGesture = 'threeFingerHold' | 'shake' | 'both' | 'none' | 'edgeHandle';
+
+/** Which screen edge the edge handle sits on. */
+export type SnitchEdgeHandleSide = 'right' | 'left';
 
 /** Where video frames come from. `system` = ReplayKit / MediaProjection (OS consent prompt). */
 export type SnitchCaptureMode = 'snapshot' | 'system' | 'off';
@@ -41,6 +44,12 @@ export interface SnitchOptions {
   videoMaxSeconds?: number;
   /** One-time "this is a test build" notice. Default true. */
   showTesterNotice?: boolean;
+  /** Edge for gesture "edgeHandle" (iOS). Default "right". */
+  edgeHandleSide?: SnitchEdgeHandleSide;
+  /** Vertical centre of the edge handle, as a fraction of the screen height (0.1–0.9). Default 0.33. */
+  edgeHandlePosition?: number;
+  /** Edge handle tint, "#RRGGBB" or "#RRGGBBAA". Default: the system tint. */
+  edgeHandleColor?: string;
 }
 
 export interface SnitchStartOptions extends SnitchOptions {
@@ -67,6 +76,9 @@ const OPTION_KEYS: readonly (keyof SnitchOptions)[] = [
   'captureMode',
   'videoMaxSeconds',
   'showTesterNotice',
+  'edgeHandleSide',
+  'edgeHandlePosition',
+  'edgeHandleColor',
 ];
 
 const RELEASE_TYPES: readonly SnitchReleaseType[] = ['debug', 'adhoc', 'enterprise', 'testflight', 'appstore', 'internal', 'play', 'unknown'];

@@ -43,7 +43,10 @@ needs a rebuild, because they end up in Info.plist and AndroidManifest.xml.
 | `ingestKey` | string | `SNITCH_INGEST_KEY` env | **Required.** The project's ingest key, `snitch_pk_` + 26 characters (dashboard → project → ingest keys). It is public and write-only. |
 | `enabled` | boolean | `true` | Master switch. `false` keeps the SDK fully inert. |
 | `enabledReleaseTypes` | string[] | `["debug", "adhoc", "enterprise", "testflight", "internal"]` | Builds Snitch runs in, from `debug`, `adhoc`, `enterprise`, `testflight`, `appstore`, `internal`, `play`. See [release types](#release-types). |
-| `gesture` | string | `"threeFingerHold"` | `threeFingerHold`, `shake`, `both` or `none` (open it from code with `Snitch.show()`). |
+| `gesture` | string | `"threeFingerHold"` | `threeFingerHold`, `shake`, `both`, `none` (open it from code with `Snitch.show()`) or `edgeHandle`: a faded tab on the screen edge that testers pull (iOS only for now; Android keeps `threeFingerHold`). |
+| `edgeHandleSide` | string | `"right"` | Edge for `edgeHandle`: `right` or `left`. |
+| `edgeHandlePosition` | number | `0.33` | Vertical centre of the handle as a fraction of the screen height, 0.1–0.9. |
+| `edgeHandleColor` | string | system tint | Handle tint, `"#RRGGBB"` or `"#RRGGBBAA"`; match your app's accent. |
 | `screenshotPrompt` | boolean | `true` | After a system screenshot, offer "Report this screen?". On Android it also needs `android.detectScreenshots` (Android 14+). |
 | `maskTextInputs` | boolean | `true` | Black out editable text inputs in screenshots and video. |
 | `captureMode` | string | `"snapshot"` | `snapshot` (the SDK draws the app's windows a few times a second, no prompt), `system` (ReplayKit / MediaProjection, OS consent prompt each session) or `off` (screenshots only). |
@@ -71,7 +74,8 @@ options leave them out (an option always wins). They are read at **prebuild** ti
 
 - **iOS:** a `Snitch` dictionary in Info.plist (`ServerURL`, `IngestKey`, and `Enabled`,
   `EnabledReleaseTypes`, `Gesture`, `ScreenshotPrompt`, `MaskTextInputs`, `CaptureMode`,
-  `VideoMaxSeconds`, `ShowTesterNotice` when set). The dictionary belongs to the plugin and is
+  `VideoMaxSeconds`, `ShowTesterNotice`, `EdgeHandleSide`, `EdgeHandlePosition`, `EdgeHandleColor`
+  when set). The dictionary belongs to the plugin and is
   rewritten on every prebuild.
 - **Android:** `<meta-data android:name="io.github.monjar.snitch.*">` entries on `<application>`
   (`SERVER_URL`, `INGEST_KEY`, … `RELEASE_TYPE`), replaced on every prebuild.

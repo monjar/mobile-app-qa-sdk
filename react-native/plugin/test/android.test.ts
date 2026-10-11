@@ -63,6 +63,13 @@ describe('applyAndroidManifest', () => {
     ]);
   });
 
+  it('keeps the default trigger on Android for the iOS-only edge handle, and writes none of its options', () => {
+    const m = applyAndroidManifest(baseManifest(), resolve({ gesture: 'edgeHandle', edgeHandleSide: 'left', edgeHandleColor: '#00E5DB' }));
+    const entries = metaData(m);
+    expect(entries).toContainEqual(['io.github.monjar.snitch.GESTURE', 'threeFingerHold']);
+    expect(entries.some(([name]) => /EDGE/i.test(name ?? ''))).toBe(false);
+  });
+
   it('is idempotent', () => {
     const once = applyAndroidManifest(baseManifest(), resolve({ ...FULL, captureMode: 'system' }));
     const snapshot = JSON.parse(JSON.stringify(once));
