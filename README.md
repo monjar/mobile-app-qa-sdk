@@ -12,8 +12,13 @@ them and escalates to **GitHub issues, email, Slack, Discord or any webhook**, w
   at about 3% of the main thread.
 - **Safe by default.** Store builds are inert, text fields are masked, nothing leaves the device unless a tester
   sends it, and the server runs on your own infrastructure.
+- **Context with every report.** A timeline of the last minutes rides along: console lines, request summaries
+  (opt-in), screen changes, touches and foreground/background, lined up with the video in the dashboard. Testers can
+  mark up or blur the screenshot, and after an unexpected exit the app offers to report it with the crash diagnostic.
+- **Triage that keeps up.** Duplicate suggestions, two-way GitHub issue sync (status and comments), assignment and
+  "fixed in build" emails, sign-in with GitHub, and a Devices page that shows which builds have Snitch running.
 - **One container** for the server: SQLite plus a volume, or S3. Run it with `docker run`, Compose with automatic TLS,
-  or Fly.io.
+  or Fly.io. Uploads resume where they stopped; the database can back itself up to a bucket on a schedule.
 
 ## Quick start
 
