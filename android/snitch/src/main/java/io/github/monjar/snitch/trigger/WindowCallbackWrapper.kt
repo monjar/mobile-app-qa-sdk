@@ -39,8 +39,8 @@ internal interface GestureHost {
     /** SNITCH_DEBUG_CANCEL_AFTER_MS, when set and honoured. */
     val debugCancelAfterMs: Long?
 
-    /** Every touchscreen event, before the detector (touch log + governor). */
-    fun onTouchEvent(event: MotionEvent, density: Float)
+    /** Every touchscreen event, before the detector (touch log + governor); the window size is in pixels. */
+    fun onTouchEvent(event: MotionEvent, density: Float, windowWidth: Int, windowHeight: Int)
 
     /** Take the screenshot and freeze the ring. Called before the cancel is sent. */
     fun onGestureFired(activity: Activity, firstDownTime: Long, debugDismiss: Boolean)
@@ -86,7 +86,8 @@ internal class WindowCallbackWrapper(
             }
             return true
         }
-        host.onTouchEvent(event, density)
+        val decor = activityRef.get()?.window?.peekDecorView()
+        host.onTouchEvent(event, density, decor?.width ?: 0, decor?.height ?: 0)
         if (action == MotionEvent.ACTION_DOWN) {
             sequenceDownTime = event.downTime
             handler.removeCallbacks(debugCancel)

@@ -73,6 +73,8 @@ internal data class AttachmentDecl(
         const val SCREENSHOT = "screenshot"
         const val VIDEO = "video"
         const val LOGS = "logs"
+        const val TIMELINE = "timeline"
+        const val CRASH = "crash"
 
         fun fileNameFor(name: String, contentType: String): String = name + when (contentType) {
             "image/jpeg" -> ".jpg"
@@ -98,4 +100,8 @@ internal data class ReportPayload(
     val custom: Map<String, String>?,
     val stats: StatsSnapshot?,
     val attachments: List<AttachmentDecl>,
+    /** The screen showing when the sheet opened (the timeline's newest screen). */
+    val screen: String? = null,
+    /** The check-in installId (spec §11.1). */
+    val installId: String? = null,
 )

@@ -11,6 +11,11 @@
  * Android's interaction frame rate is 8 fps (iOS: 4). The contract default for
  * `video.activeFps` is 4, so a remote value equal to that default means "not
  * tuned" and maps to the Android default; any other value is honoured.
+ *
+ * The 0.3 switches — timeline console / network / screens and the crash prompt —
+ * are static AND remote: the remote config can only narrow what the app enabled
+ * (network capture in particular must be switched on in the app). `features` is
+ * what the answering server supports; empty until a 0.3 server has answered.
  */
 package io.github.monjar.snitch.config
 
@@ -33,6 +38,11 @@ internal data class EffectiveConfig(
     val maskTextInputs: Boolean,
     val screenshotPrompt: Boolean,
     val ttlSeconds: Long,
+    val captureConsole: Boolean,
+    val captureNetwork: Boolean,
+    val trackScreens: Boolean,
+    val crashPrompt: Boolean,
+    val features: Set<String>,
 ) {
     val videoEnabled: Boolean get() = captureMode != SnitchCaptureMode.OFF
 
@@ -64,6 +74,11 @@ internal data class EffectiveConfig(
                 maskTextInputs = if (remote == null) options.maskTextInputs else base.maskTextInputs,
                 screenshotPrompt = if (remote == null) options.screenshotPrompt else base.screenshotPrompt,
                 ttlSeconds = base.ttlSeconds,
+                captureConsole = options.captureConsole && base.timeline.console,
+                captureNetwork = options.captureNetwork && base.timeline.network,
+                trackScreens = options.trackScreens && base.timeline.screens,
+                crashPrompt = options.crashPrompt && base.crashPrompt,
+                features = remote?.features?.toSet() ?: emptySet(),
             )
         }
 

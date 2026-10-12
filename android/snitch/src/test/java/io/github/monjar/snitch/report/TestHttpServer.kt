@@ -125,6 +125,7 @@ internal class TestHttpServer(
     private fun reason(status: Int): String = when (status) {
         200 -> "OK"
         201 -> "Created"
+        202 -> "Accepted"
         304 -> "Not Modified"
         401 -> "Unauthorized"
         403 -> "Forbidden"

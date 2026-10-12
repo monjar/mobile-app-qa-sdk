@@ -38,7 +38,9 @@ dependencies {
 tasks.test {
     useJUnitPlatform()
     systemProperty("snitch.vectorsDir", rootProject.file("../../contract/vectors").absolutePath)
+    systemProperty("snitch.fixturesDir", rootProject.file("../../contract/fixtures").absolutePath)
     inputs.dir(rootProject.file("../../contract/vectors"))
+    inputs.dir(rootProject.file("../../contract/fixtures"))
     testLogging {
         events("passed", "failed", "skipped")
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL

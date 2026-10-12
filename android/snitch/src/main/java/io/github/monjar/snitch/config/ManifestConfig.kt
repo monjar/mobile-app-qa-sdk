@@ -2,8 +2,8 @@
  * Static configuration from the app manifest (spec §2.1): `<meta-data
  * android:name="io.github.monjar.snitch.*">` on <application>. Values may be
  * typed by aapt (true → Boolean, 30 → Integer) or strings, so everything is
- * read leniently. Also reads the debug hooks (`DEBUG_*`, spec §9) and the
- * RELEASE_TYPE override, which apps usually set per build type with
+ * read leniently. Also reads the debug hooks (`DEBUG_*`, spec §9 and §11.10)
+ * and the RELEASE_TYPE override, which apps usually set per build type with
  * manifestPlaceholders.
  */
 package io.github.monjar.snitch.config
@@ -74,14 +74,20 @@ internal object ManifestConfigReader {
             captureMode = string(md, "CAPTURE_MODE")?.let { checked("CAPTURE_MODE", it, SnitchCaptureMode.fromWire(it)) } ?: d.captureMode,
             videoMaxSeconds = int(md, "VIDEO_MAX_SECONDS")?.coerceIn(1, 30) ?: d.videoMaxSeconds,
             showTesterNotice = bool(md, "SHOW_TESTER_NOTICE") ?: d.showTesterNotice,
+            captureConsole = bool(md, "CAPTURE_CONSOLE") ?: d.captureConsole,
+            captureNetwork = bool(md, "CAPTURE_NETWORK") ?: d.captureNetwork,
+            trackScreens = bool(md, "TRACK_SCREENS") ?: d.trackScreens,
+            crashPrompt = bool(md, "CRASH_PROMPT") ?: d.crashPrompt,
+            checkInWhenInactive = bool(md, "CHECKIN_WHEN_INACTIVE") ?: d.checkInWhenInactive,
         )
         val debugServer = string(md, "DEBUG_SERVER_URL")
         val debugKey = string(md, "DEBUG_INGEST_KEY")
         val autoReport = int(md, "DEBUG_AUTOREPORT")
         val cancelAfter = int(md, "DEBUG_CANCEL_AFTER_MS")?.toLong()
         val showOnLaunch = bool(md, "DEBUG_SHOW_ON_LAUNCH") ?: false
-        val debug = if (debugServer != null || debugKey != null || autoReport != null || cancelAfter != null || showOnLaunch) {
-            SnitchDebugOverrides(debugServer, debugKey, autoReport, cancelAfter, showOnLaunch)
+        val chunkBytes = int(md, "DEBUG_CHUNK_BYTES")
+        val debug = if (debugServer != null || debugKey != null || autoReport != null || cancelAfter != null || showOnLaunch || chunkBytes != null) {
+            SnitchDebugOverrides(debugServer, debugKey, autoReport, cancelAfter, showOnLaunch, chunkBytes)
         } else {
             null
         }

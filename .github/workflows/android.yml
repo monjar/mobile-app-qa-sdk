@@ -129,10 +129,17 @@ jobs:
           working-directory: android
           script: |
             adb logcat -c
+            adb reverse tcp:8080 tcp:8080
             ./gradlew --no-daemon :example:connectedDebugAndroidTest || (adb logcat -d > "$RUNNER_TEMP/logcat.txt"; exit 1)
             adb logcat -d > "$RUNNER_TEMP/logcat.txt"
       - name: Wait for the auto-report on the server
-        run: node scripts/ci-await-report.mjs --server http://127.0.0.1:8080 --description autoreport --out "$RUNNER_TEMP/report" --timeout 300
+        # The example logs, names its screen and requests localhost:8080/health (through adb reverse;
+        # the SDK's own 10.0.2.2 host is never recorded) before the auto-report, whose clip and
+        # timeline go up in 64 KiB chunks (ci-start-server.sh).
+        run: >-
+          node scripts/ci-await-report.mjs --server http://127.0.0.1:8080 --description autoreport --out "$RUNNER_TEMP/report" --timeout 300
+          --expect-timeline app,touch,log,net,screen --expect-log "autoreport test starting"
+          --expect-net "localhost:8080/health" --expect-screen Example --expect-checkin android
       - name: Verify the video
         run: |
           command -v ffprobe >/dev/null || { sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg; }

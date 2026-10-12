@@ -5,7 +5,8 @@
  *
  * Card: drag handle + "Report" header with close; optional remote message;
  * type chips (first selected); multiline description (focused, 4–8 lines);
- * Screenshot checkbox + 44×88 dp thumbnail (tap → full-screen preview);
+ * Screenshot checkbox + 44×88 dp thumbnail (tap → the markup editor, whose
+ * result replaces the screenshot);
  * Video checkbox with "last [N] s" — digits only, −/+ steppers, bounded
  * 1…min(videoMaxSeconds, buffered seconds), caption "of 28 s recorded" or
  * "Nothing recorded yet"; a "More" section with email, "Pause recording" and
@@ -23,8 +24,6 @@ import android.annotation.TargetApi
 import android.app.Activity
 import android.app.AlertDialog
 import android.app.Dialog
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
@@ -70,6 +69,10 @@ internal class ReportSheetModel(
     val email: String?,
     val recordingPaused: Boolean,
     val sdkVersion: String,
+    /** Whether the Screenshot box starts ticked (the crash follow-up's fresh screenshot doesn't show the crash). */
+    val screenshotChecked: Boolean = true,
+    /** Something goes along whatever the boxes say (the crash follow-up's diagnostic), so Send needs no description. */
+    val implicitAttachment: Boolean = false,
 )
 
 internal class ReportDraft(
@@ -85,6 +88,9 @@ internal interface ReportSheetListener {
     fun onSend(draft: ReportDraft)
 
     fun onPauseRecordingChanged(paused: Boolean)
+
+    /** The tester marked up the screenshot: send [shot] instead. */
+    fun onScreenshotEdited(shot: Screenshot)
 
     /** After the sheet is gone, sent or not. */
     fun onClosed()
@@ -347,7 +353,7 @@ internal class ReportDialog(
             text = Strings.SCREENSHOT
             textSp(16f)
             setTextColor(p.onSurface)
-            isChecked = true
+            isChecked = model.screenshotChecked
             setOnCheckedChangeListener { _, _ -> updateSend() }
         }
         screenshotCheck = check
@@ -357,7 +363,7 @@ internal class ReportDialog(
             background = roundedBackground(p.field, ctx.dpf(6f), p.handle, max(1, ctx.dp(0.5f)))
             clipToOutline = true
             contentDescription = Strings.SCREENSHOT_PREVIEW
-            setOnClickListener { preview() }
+            setOnClickListener { markUp() }
         }
         thumbnail = thumb
         row.addView(thumb, LinearLayout.LayoutParams(ctx.dp(44f), ctx.dp(88f)))
@@ -538,7 +544,7 @@ internal class ReportDialog(
     private fun hasAttachment(): Boolean {
         val shot = screenshotCheck?.let { it.isChecked && !screenshotFailed } ?: false
         val video = videoCheck?.let { it.isChecked && maxSeconds > 0 } ?: false
-        return shot || video
+        return shot || video || model.implicitAttachment
     }
 
     private fun updateSend() {
@@ -631,25 +637,19 @@ internal class ReportDialog(
         }
     }
 
-    private fun preview() {
+    /** Opens the markup editor; its result replaces the screenshot (and ticks the box). */
+    private fun markUp() {
         val shot = screenshot ?: return
-        val metrics = activity.resources.displayMetrics
-        val opts = BitmapFactory.Options().apply {
-            inSampleSize = 1
-            while (shot.width / (inSampleSize * 2) >= metrics.widthPixels && shot.height / (inSampleSize * 2) >= metrics.heightPixels / 2) inSampleSize *= 2
+        if (closing) return
+        hideKeyboard()
+        MarkupEditor.open(activity, shot) { edited ->
+            if (closing) return@open
+            screenshot = edited
+            screenshotCheck?.isChecked = true
+            applyScreenshot()
+            updateSend()
+            listener.onScreenshotEdited(edited)
         }
-        val bitmap: Bitmap = BitmapFactory.decodeByteArray(shot.jpeg, 0, shot.jpeg.size, opts) ?: return
-        @Suppress("DEPRECATION")
-        val d = Dialog(activity, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
-        val image = ImageView(activity).apply {
-            setBackgroundColor(Color.BLACK)
-            scaleType = ImageView.ScaleType.FIT_CENTER
-            setImageBitmap(bitmap)
-            contentDescription = Strings.SCREENSHOT
-            setOnClickListener { d.dismiss() }
-        }
-        d.setContentView(image)
-        d.show()
     }
 
     private fun afterChange(block: () -> Unit) = object : TextWatcher {

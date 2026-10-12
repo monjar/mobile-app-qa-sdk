@@ -1,7 +1,8 @@
 /*
  * Small Snitch surfaces shown over the app without touching its view tree:
  * the toast-like top banner ("Sending…" → "Sent · MOCH-42"), the one-time
- * tester notice card, and the "Report this screen?" pill.
+ * tester notice card, and the prompt pill ("Report this screen?", and the crash
+ * follow-up's "The app closed unexpectedly. Report it?").
  *
  * Each is a TYPE_APPLICATION_PANEL window attached to the current activity's
  * window token — a sub-window, so it is never part of the activity's own
@@ -161,32 +162,74 @@ internal class TesterNotice(private val activity: Activity, private val message:
     fun belongsTo(a: Activity) = overlay.belongsTo(a)
 }
 
-/** "Report this screen?" pill after a system screenshot, for 4 s. */
-internal class ScreenshotPromptPill(private val handler: Handler) {
+/**
+ * A pill at the top of the screen: "Report this screen?" after a system
+ * screenshot, or the crash follow-up. Tapping it runs onTap; with onDismiss it
+ * also has a close button. It hides by itself after durationMs (that is not a
+ * dismissal: onDismiss only runs when the tester closes it).
+ */
+internal class PromptPill(private val handler: Handler) {
     private var overlay: OverlayWindow? = null
     private val hide = Runnable { dismiss() }
 
-    fun show(activity: Activity, onTap: () -> Unit) {
+    /** False when the activity's window can't take it yet (not attached, finishing). */
+    fun show(activity: Activity, text: String, durationMs: Long, onTap: () -> Unit, onDismiss: (() -> Unit)? = null): Boolean {
         dismiss()
         val p = Palette.of(activity)
-        val pill = TextView(activity).apply {
-            text = Strings.REPORT_THIS_SCREEN
+        val label = TextView(activity).apply {
+            this.text = text
             textSp(15f)
             setTextColor(p.onAccent)
-            background = roundedBackground(p.accent, activity.dpf(22f))
-            setPadding(activity.dp(20f), activity.dp(12f), activity.dp(20f), activity.dp(12f))
-            elevation = activity.dpf(8f)
             isClickable = true
+            isFocusable = true
             setOnClickListener {
                 dismiss()
                 onTap()
             }
         }
+        val content: View = if (onDismiss == null) {
+            label.apply {
+                background = roundedBackground(p.accent, activity.dpf(22f))
+                setPadding(activity.dp(20f), activity.dp(12f), activity.dp(20f), activity.dp(12f))
+                elevation = activity.dpf(8f)
+            }
+        } else {
+            LinearLayout(activity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                background = roundedBackground(p.accent, activity.dpf(22f))
+                elevation = activity.dpf(8f)
+                label.setPadding(activity.dp(20f), activity.dp(12f), activity.dp(8f), activity.dp(12f))
+                addView(label, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                addView(
+                    TextView(activity).apply {
+                        this.text = "✕"
+                        textSp(15f)
+                        setTextColor(p.onAccent)
+                        gravity = Gravity.CENTER
+                        contentDescription = Strings.DISMISS
+                        isClickable = true
+                        isFocusable = true
+                        setOnClickListener {
+                            dismiss()
+                            onDismiss()
+                        }
+                    },
+                    LinearLayout.LayoutParams(activity.dp(44f), activity.dp(44f)),
+                )
+            }
+        }
         val o = OverlayWindow(activity, Gravity.TOP)
         val top = activity.window?.peekDecorView()?.let { Insets.of(it).first } ?: 0
-        if (!o.show(pill, top + activity.dp(12f), touchable = true)) return
+        val width = if (onDismiss == null) {
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        } else {
+            minOf(activity.resources.displayMetrics.widthPixels - activity.dp(32f), activity.dp(420f))
+        }
+        if (!o.show(content, top + activity.dp(12f), touchable = true, width = width)) return false
         overlay = o
-        handler.postDelayed(hide, DURATION_MS)
+        handler.postDelayed(hide, durationMs)
+        return true
     }
 
     fun dismiss() {
@@ -197,9 +240,5 @@ internal class ScreenshotPromptPill(private val handler: Handler) {
 
     fun onActivityPaused(activity: Activity) {
         if (overlay?.belongsTo(activity) == true) dismiss()
-    }
-
-    companion object {
-        private const val DURATION_MS = 4000L
     }
 }

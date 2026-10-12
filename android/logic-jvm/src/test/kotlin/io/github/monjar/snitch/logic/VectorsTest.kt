@@ -32,7 +32,7 @@ class VectorsTest {
     @Test
     fun `every vector file is covered`() {
         val files = vectorsDir.listFiles { f -> f.extension == "json" }!!.map { it.name }.toSet()
-        assertEquals(setOf("gesture.json", "governor.json", "ring.json", "compose.json", "release-type.json"), files)
+        assertEquals(setOf("gesture.json", "governor.json", "ring.json", "compose.json", "release-type.json", "url-sanitize.json"), files)
     }
 
     @TestFactory
@@ -172,6 +172,16 @@ class VectorsTest {
                     override = if (s.isNull("override")) null else s.getString("override"),
                 )
                 assertEquals(c.getString("expect"), ReleaseTypeClassifier.classifyAndroid(signals))
+            }
+        }
+    }
+
+    @TestFactory
+    fun urlSanitize(): List<DynamicTest> {
+        val v = load("url-sanitize.json")
+        return v.getJSONArray("cases").objects().map { c ->
+            dynamicTest("url-sanitize: ${c.getString("name")}") {
+                assertEquals(c.getString("out"), UrlSanitizer.sanitize(c.getString("in")))
             }
         }
     }
