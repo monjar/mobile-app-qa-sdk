@@ -1,12 +1,39 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useLocation, useSearch } from 'wouter';
-import type { Me } from '@snitch/contract';
+import type { AuthProviders, Me } from '@snitch/contract';
 import { api, errorText } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { Logo } from '../components/icons';
+import { qk } from '../lib/queries';
+import { Github, Logo } from '../components/icons';
+
+/** Where the GitHub callback sends a failed sign-in: /login?error=<code>. */
+const GITHUB_ERRORS: Record<string, string> = {
+  github_denied: 'GitHub sign-in was cancelled.',
+  github_state: 'That sign-in expired or was started in another browser. Try again.',
+  github_org: "Your GitHub account isn't an active member of the organization this server allows.",
+  github_no_user: 'No Snitch account matches your GitHub account. Ask an admin to add you with an email address verified on GitHub.',
+  github_disabled: 'Your Snitch account is disabled. Ask an admin to turn it back on.',
+  github_error: 'Something went wrong talking to GitHub. Try again in a moment.',
+};
+
+/** Sign-in failures arrive as ?error=…; everything else in the URL is where to go afterwards. */
+function signInTarget(path: string, search: string): { next: string; error: string | null } {
+  const params = new URLSearchParams(search);
+  const code = params.get('error');
+  params.delete('error');
+  const rest = params.toString();
+  return {
+    next: path === '/login' ? '/' : `${path}${rest ? `?${rest}` : ''}`,
+    error: code === null ? null : (GITHUB_ERRORS[code] ?? `Sign-in failed (${code}).`),
+  };
+}
 
 export function Login() {
   const { signIn } = useAuth();
+  const [path] = useLocation();
+  const { next, error: redirectError } = signInTarget(path, useSearch());
+  const providers = useQuery({ queryKey: qk.authProviders, queryFn: () => api<AuthProviders>('/auth/providers'), staleTime: Infinity, retry: false });
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -40,6 +67,11 @@ export function Login() {
             <Logo /> Snitch
           </div>
           {setupNeeded && <div className="notice warn">No accounts yet. Open the setup link printed in the server log to create the first admin.</div>}
+          {redirectError && !error && (
+            <div className="notice danger" role="alert">
+              {redirectError}
+            </div>
+          )}
           <label className="field">
             Email
             <input type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
@@ -52,6 +84,14 @@ export function Login() {
           <button className="primary" type="submit" disabled={busy}>
             {busy ? 'Signing in…' : 'Sign in'}
           </button>
+          {providers.data?.github && (
+            <>
+              <div className="divider">or</div>
+              <a className="btn" href={`/api/admin/auth/github/start?next=${encodeURIComponent(next)}`}>
+                <Github className="icon-inline" /> Sign in with GitHub
+              </a>
+            </>
+          )}
         </form>
       </div>
     </div>

@@ -3,7 +3,7 @@ import { Link, useLocation } from 'wouter';
 import { useAuth } from '../lib/auth';
 import { useProjects, useServerInfo } from '../lib/queries';
 import { useSelectedProject } from '../lib/project';
-import { Activity, Inbox, Logo, Plus, Settings, Users } from './icons';
+import { Activity, Inbox, Logo, Phone, Plus, Settings, Users } from './icons';
 import { Avatar } from './ui';
 
 function NavLink({ href, children, count, match }: { href: string; children: ReactNode; count?: number; match?: (path: string) => boolean }) {
@@ -22,7 +22,7 @@ export function Layout({ children, onNewProject }: { children: ReactNode; onNewP
   const projects = useProjects();
   const server = useServerInfo();
   const [selected, setSelected] = useSelectedProject();
-  const [, navigate] = useLocation();
+  const [path, navigate] = useLocation();
   const total = projects.data?.reduce((n, p) => n + p.openTickets, 0) ?? 0;
 
   return (
@@ -55,7 +55,20 @@ export function Layout({ children, onNewProject }: { children: ReactNode; onNewP
               <span>{p.name}</span>
               <span className="nav-count">{p.openTickets || ''}</span>
             </button>
-            <Link href={`/projects/${p.id}/settings`} className="nav-link" title={`${p.name} settings`} aria-label={`${p.name} settings`}>
+            <Link
+              href={`/projects/${p.id}/devices`}
+              className={`nav-link${path === `/projects/${p.id}/devices` ? ' active' : ''}`}
+              title={`${p.name} devices`}
+              aria-label={`${p.name} devices`}
+            >
+              <Phone />
+            </Link>
+            <Link
+              href={`/projects/${p.id}/settings`}
+              className={`nav-link${path.startsWith(`/projects/${p.id}/settings`) ? ' active' : ''}`}
+              title={`${p.name} settings`}
+              aria-label={`${p.name} settings`}
+            >
               <Settings />
             </Link>
           </div>

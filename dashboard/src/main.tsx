@@ -11,6 +11,7 @@ import { Login, Setup } from './pages/Login';
 import { Inbox } from './pages/Inbox';
 import { Ticket } from './pages/Ticket';
 import { ProjectSettings } from './pages/ProjectSettings';
+import { Devices } from './pages/Devices';
 import { Team } from './pages/Team';
 import { Jobs } from './pages/Jobs';
 import { NewProject } from './pages/NewProject';
@@ -38,6 +39,11 @@ function App() {
         <Route path="/" component={Inbox} />
         <Route path="/tickets/:id">{(p) => <Ticket key={p.id} id={p.id} />}</Route>
         <Route path="/projects/:id/settings/:tab?">{(p) => <ProjectSettings id={p.id} tab={p.tab} />}</Route>
+        <Route path="/projects/:id/devices">{(p) => <Devices key={p.id} id={p.id} />}</Route>
+        {/* Where a failed GitHub sign-in lands; once signed in there's nothing to show there. */}
+        <Route path="/login">
+          <Redirect to="/" />
+        </Route>
         <Route path="/team">{user.role === 'admin' ? <Team /> : <Redirect to="/" />}</Route>
         <Route path="/jobs">{user.role === 'admin' ? <Jobs /> : <Redirect to="/" />}</Route>
         <Route>

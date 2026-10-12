@@ -38,6 +38,7 @@ export default defineConfig({
       SNITCH_BOOTSTRAP_ADMIN_PASSWORD: 'e2e-password-123',
       SNITCH_ALLOW_PRIVATE_WEBHOOKS: 'true',
       SNITCH_REPORTS_PER_IP_PER_10_MIN: '1000',
+      SNITCH_LOGIN_PER_IP_PER_15_MIN: '1000',
     },
   },
 });

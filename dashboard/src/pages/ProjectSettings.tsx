@@ -1,6 +1,6 @@
 /**
  * Everything about one project: install snippets, ingest keys, which builds
- * the SDK runs in (remote config), integrations and routing rules.
+ * the SDK runs in (remote config), integrations and routing rules, notifications.
  */
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -11,6 +11,8 @@ import {
   PLATFORMS,
   RELEASE_TYPES,
   type CaptureMode,
+  type EmailConfig,
+  type GithubConfig,
   type IngestKeyCreated,
   type IngestKeyView,
   type IntegrationCreate,
@@ -23,12 +25,16 @@ import {
   type RoutingRuleView,
   type SdkConfigEntry,
   type SdkConfigView,
+  type TimelineConfig,
+  type WebhookConfig,
+  type WebhookSecretCreated,
 } from '@snitch/contract';
 import { del, errorText, get, patch, post, put } from '../lib/api';
 import { RELEASE_LABEL, osName, relativeTime } from '../lib/format';
 import { qk, useIntegrations, useProjects, useServerInfo } from '../lib/queries';
 import { useAuth } from '../lib/auth';
 import { CopyButton, Dialog, Empty, IntegrationIcon, Snippet, useToast } from '../components/ui';
+import { External } from '../components/icons';
 
 const TABS = [
   ['install', 'Install'],
@@ -55,8 +61,13 @@ export function ProjectSettings({ id, tab }: { id: string; tab?: string }) {
     <div className="page">
       <div className="page-header">
         <h1>{project.name}</h1>
-        <span className="muted small mono">
-          {project.slug} · {project.ticketPrefix}-…
+        <span className="row">
+          <span className="muted small mono">
+            {project.slug} · {project.ticketPrefix}-…
+          </span>
+          <Link href={`/projects/${id}/devices`} className="btn small">
+            Devices
+          </Link>
         </span>
       </div>
       <div className="tabs">
@@ -338,7 +349,36 @@ function Builds({ project, readOnly }: { project: ProjectView; readOnly: boolean
               />
               Offer to report after a system screenshot
             </label>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={global.crashPrompt ?? DEFAULT_SDK_CONFIG.crashPrompt}
+                disabled={readOnly}
+                onChange={(e) => setEntry('*', '*', (c) => ({ ...c, crashPrompt: e.target.checked }))}
+              />
+              Offer to report a crash on the next launch
+            </label>
           </div>
+          <fieldset className="fieldset">
+            <legend>Report timeline</legend>
+            <div className="row wrap" style={{ gap: 16 }}>
+              {TIMELINE_SWITCHES.map(([key, label]) => (
+                <label key={key} className="check">
+                  <input
+                    type="checkbox"
+                    checked={global.timeline?.[key] ?? DEFAULT_SDK_CONFIG.timeline[key]}
+                    disabled={readOnly}
+                    onChange={(e) => setEntry('*', '*', (c) => ({ ...c, timeline: { ...c.timeline, [key]: e.target.checked } }))}
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+            <span className="field-hint">
+              What reports from SDK 0.3+ record next to the video. Network requests also have to be switched on in the app build (captureNetwork in the Expo plugin, CaptureNetwork in
+              Info.plist, CAPTURE_NETWORK in the Android manifest); this switch can only turn them off.
+            </span>
+          </fieldset>
           <label className="field">
             Message shown on the report sheet
             <input
@@ -363,6 +403,11 @@ function Builds({ project, readOnly }: { project: ProjectView; readOnly: boolean
   );
 }
 
+const TIMELINE_SWITCHES: [keyof TimelineConfig, string][] = [
+  ['console', 'Console logs'],
+  ['network', 'Network requests'],
+  ['screens', 'Screen changes'],
+];
 const MODE_LABEL: Record<CaptureMode, string> = { snapshot: 'In-app snapshots', system: 'System capture', off: 'Off' };
 const RELEASE_HINT: Record<ReleaseType, string> = {
   debug: 'Xcode / Android Studio / simulators',
@@ -402,7 +447,7 @@ function Integrations({ project, readOnly }: { project: ProjectView; readOnly: b
   const toast = useToast();
   const list = useIntegrations(project.id);
   const server = useServerInfo();
-  const [adding, setAdding] = useState<IntegrationKind | null>(null);
+  const [dialog, setDialog] = useState<{ kind: IntegrationKind; existing?: IntegrationView } | null>(null);
   const refresh = () => void qc.invalidateQueries({ queryKey: qk.integrations(project.id) });
   const test = useMutation({
     mutationFn: (id: string) => post<{ message: string }>(`/integrations/${id}/test`),
@@ -428,13 +473,13 @@ function Integrations({ project, readOnly }: { project: ProjectView; readOnly: b
         actions={
           !readOnly && (
             <div className="row">
-              <button type="button" className="small" onClick={() => setAdding('github')}>
+              <button type="button" className="small" onClick={() => setDialog({ kind: 'github' })}>
                 <IntegrationIcon kind="github" /> GitHub
               </button>
-              <button type="button" className="small" onClick={() => setAdding('email')}>
+              <button type="button" className="small" onClick={() => setDialog({ kind: 'email' })}>
                 <IntegrationIcon kind="email" /> Email
               </button>
-              <button type="button" className="small" onClick={() => setAdding('webhook')}>
+              <button type="button" className="small" onClick={() => setDialog({ kind: 'webhook' })}>
                 <IntegrationIcon kind="webhook" /> Webhook
               </button>
             </div>
@@ -462,6 +507,9 @@ function Integrations({ project, readOnly }: { project: ProjectView; readOnly: b
                         <button type="button" className="small" onClick={() => test.mutate(i.id)} disabled={test.isPending}>
                           Send test
                         </button>
+                        <button type="button" className="small" onClick={() => setDialog({ kind: i.kind, existing: i })} aria-label={`Edit ${i.name}`}>
+                          Edit
+                        </button>
                         <button type="button" className="small" onClick={() => toggle.mutate(i)}>
                           {i.enabled ? 'Disable' : 'Enable'}
                         </button>
@@ -478,14 +526,22 @@ function Integrations({ project, readOnly }: { project: ProjectView; readOnly: b
           </table>
         )}
       </Section>
-      {adding && <IntegrationDialog kind={adding} projectId={project.id} onClose={() => setAdding(null)} onSaved={() => (setAdding(null), refresh())} />}
+      {list.data
+        ?.filter((i) => i.kind === 'github' && i.webhook)
+        .map((i) => (
+          <GithubWebhook key={i.id} integration={i} readOnly={readOnly} onEdit={() => setDialog({ kind: 'github', existing: i })} />
+        ))}
+      {dialog && <IntegrationDialog kind={dialog.kind} existing={dialog.existing} projectId={project.id} onClose={() => setDialog(null)} onSaved={() => (setDialog(null), refresh())} />}
     </>
   );
 }
 
 function describeIntegration(i: IntegrationView): string {
   const c = i.config as Record<string, unknown>;
-  if (i.kind === 'github') return `${String(c.owner)}/${String(c.repo)}${c.includeShareLinks ? ' · with public media links' : ''}`;
+  if (i.kind === 'github') {
+    const sync = [c.syncStatus && 'status', c.syncComments && 'comments'].filter(Boolean).join(' and ');
+    return `${String(c.owner)}/${String(c.repo)}${c.includeShareLinks ? ' · with public media links' : ''}${sync ? ` · syncs ${sync}` : ''}`;
+  }
   if (i.kind === 'email') return (c.to as string[]).join(', ');
   return `${String(c.format)} · ${(() => {
     try {
@@ -496,20 +552,30 @@ function describeIntegration(i: IntegrationView): string {
   })()}${i.hasSecret ? ' · signed' : ''}`;
 }
 
-function IntegrationDialog({ kind, projectId, onClose, onSaved }: { kind: IntegrationKind; projectId: string; onClose: () => void; onSaved: () => void }) {
-  const [name, setName] = useState(kind === 'github' ? 'GitHub issues' : kind === 'email' ? 'Email' : 'Webhook');
-  const [owner, setOwner] = useState('');
-  const [repo, setRepo] = useState('');
-  const [labels, setLabels] = useState('bug-report');
+/** Creates an integration, or edits `existing` (secrets left empty stay as they are). */
+function IntegrationDialog({ kind, existing, projectId, onClose, onSaved }: { kind: IntegrationKind; existing?: IntegrationView; projectId: string; onClose: () => void; onSaved: () => void }) {
+  const gh = existing?.kind === 'github' ? (existing.config as GithubConfig) : null;
+  const em = existing?.kind === 'email' ? (existing.config as EmailConfig) : null;
+  const wh = existing?.kind === 'webhook' ? (existing.config as WebhookConfig) : null;
+  const [name, setName] = useState(existing?.name ?? (kind === 'github' ? 'GitHub issues' : kind === 'email' ? 'Email' : 'Webhook'));
+  const [owner, setOwner] = useState(gh?.owner ?? '');
+  const [repo, setRepo] = useState(gh?.repo ?? '');
+  const [labels, setLabels] = useState(gh ? gh.labels.join(', ') : 'bug-report');
   const [token, setToken] = useState('');
-  const [shareLinks, setShareLinks] = useState(false);
-  const [to, setTo] = useState('');
-  const [url, setUrl] = useState('');
-  const [format, setFormat] = useState<'generic' | 'slack' | 'discord'>('slack');
+  const [shareLinks, setShareLinks] = useState(gh?.includeShareLinks ?? wh?.includeShareLinks ?? false);
+  const [syncStatus, setSyncStatus] = useState(gh?.syncStatus ?? false);
+  const [syncComments, setSyncComments] = useState(gh?.syncComments ?? false);
+  const [to, setTo] = useState(em ? em.to.join(', ') : '');
+  const [url, setUrl] = useState(wh?.url ?? '');
+  const [format, setFormat] = useState<'generic' | 'slack' | 'discord'>(wh?.format ?? 'slack');
   const [secret, setSecret] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const create = useMutation({
-    mutationFn: (body: IntegrationCreate) => post(`/projects/${projectId}/integrations`, body),
+  const save = useMutation({
+    mutationFn: (body: IntegrationCreate) => {
+      if (!existing) return post(`/projects/${projectId}/integrations`, body);
+      const newSecret = 'secret' in body ? body.secret : undefined;
+      return patch(`/integrations/${existing.id}`, { name: body.name, config: body.config, ...(newSecret ? { secret: newSecret } : {}) });
+    },
     onSuccess: onSaved,
     onError: (e) => setError(errorText(e)),
   });
@@ -519,21 +585,26 @@ function IntegrationDialog({ kind, projectId, onClose, onSaved }: { kind: Integr
     setError(null);
     const list = (s: string) => s.split(',').map((x) => x.trim()).filter(Boolean);
     if (kind === 'github')
-      create.mutate({ kind, name, secret: token.trim(), config: { owner: owner.trim(), repo: repo.trim(), labels: list(labels), assignees: [], includeShareLinks: shareLinks, shareTtlDays: 30 } });
-    else if (kind === 'email') create.mutate({ kind, name, config: { to: list(to), subjectPrefix: '[Snitch]' } });
-    else create.mutate({ kind, name, config: { url: url.trim(), format, includeShareLinks: shareLinks, shareTtlDays: 30 }, ...(format === 'generic' && secret ? { secret } : {}) });
+      save.mutate({
+        kind,
+        name,
+        secret: token.trim(),
+        config: { ...gh, owner: owner.trim(), repo: repo.trim(), labels: list(labels), assignees: gh?.assignees ?? [], includeShareLinks: shareLinks, shareTtlDays: gh?.shareTtlDays ?? 30, syncStatus, syncComments },
+      });
+    else if (kind === 'email') save.mutate({ kind, name, config: { ...em, to: list(to), subjectPrefix: em?.subjectPrefix ?? '[Snitch]' } });
+    else save.mutate({ kind, name, config: { ...wh, url: url.trim(), format, includeShareLinks: shareLinks, shareTtlDays: wh?.shareTtlDays ?? 30 }, ...(format === 'generic' && secret ? { secret } : {}) });
   };
 
   return (
     <Dialog
-      title={kind === 'github' ? 'Connect GitHub' : kind === 'email' ? 'Email escalation' : 'Webhook'}
+      title={existing ? `Edit ${existing.name}` : kind === 'github' ? 'Connect GitHub' : kind === 'email' ? 'Email escalation' : 'Webhook'}
       onClose={onClose}
       footer={
         <>
           <button type="button" onClick={onClose}>
             Cancel
           </button>
-          <button type="submit" form="integration-form" className="primary" disabled={create.isPending}>
+          <button type="submit" form="integration-form" className="primary" disabled={save.isPending}>
             Save
           </button>
         </>
@@ -558,7 +629,14 @@ function IntegrationDialog({ kind, projectId, onClose, onSaved }: { kind: Integr
             </div>
             <label className="field">
               Access token
-              <input type="password" value={token} onChange={(e) => setToken(e.target.value)} required autoComplete="off" placeholder="github_pat_…" />
+              <input
+                type="password"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                required={!existing}
+                autoComplete="off"
+                placeholder={existing ? 'Leave empty to keep the current token' : 'github_pat_…'}
+              />
               <span className="field-hint">A fine-grained personal access token for this repository with “Issues: Read and write”. Stored encrypted.</span>
             </label>
             <label className="field">
@@ -566,6 +644,24 @@ function IntegrationDialog({ kind, projectId, onClose, onSaved }: { kind: Integr
               <input value={labels} onChange={(e) => setLabels(e.target.value)} placeholder="bug-report, qa" />
               <span className="field-hint">Comma-separated. A type:… label is added automatically.</span>
             </label>
+            <fieldset className="fieldset">
+              <legend>Two-way sync</legend>
+              <label className="check block">
+                <input type="checkbox" checked={syncStatus} onChange={(e) => setSyncStatus(e.target.checked)} />
+                <span>
+                  Status
+                  <span className="field-hint">Resolving, won't-fix or duplicate here closes the issue and reopening reopens it; closing or reopening the issue updates the ticket.</span>
+                </span>
+              </label>
+              <label className="check block">
+                <input type="checkbox" checked={syncComments} onChange={(e) => setSyncComments(e.target.checked)} />
+                <span>
+                  Comments
+                  <span className="field-hint">Comments here are posted to the issue, and issue comments appear on the ticket.</span>
+                </span>
+              </label>
+              <span className="field-hint">Changes on GitHub reach Snitch through a webhook; the steps appear under Integrations once this is saved.</span>
+            </fieldset>
           </>
         )}
         {kind === 'email' && (
@@ -592,7 +688,7 @@ function IntegrationDialog({ kind, projectId, onClose, onSaved }: { kind: Integr
             {format === 'generic' && (
               <label className="field">
                 Signing secret (optional)
-                <input value={secret} onChange={(e) => setSecret(e.target.value)} autoComplete="off" />
+                <input value={secret} onChange={(e) => setSecret(e.target.value)} autoComplete="off" placeholder={existing?.hasSecret ? 'Leave empty to keep the current secret' : undefined} />
                 <span className="field-hint">Requests carry X-Snitch-Signature: sha256=HMAC(secret, timestamp + "." + body).</span>
               </label>
             )}
@@ -607,6 +703,121 @@ function IntegrationDialog({ kind, projectId, onClose, onSaved }: { kind: Integr
         {error && <div className="error-text">{error}</div>}
       </form>
     </Dialog>
+  );
+}
+
+/** Where GitHub sends issue events for two-way sync, its signing secret, and how to set it up. */
+function GithubWebhook({ integration: i, readOnly, onEdit }: { integration: IntegrationView; readOnly: boolean; onEdit: () => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [confirmRegenerate, setConfirmRegenerate] = useState(false);
+  const [created, setCreated] = useState<WebhookSecretCreated | null>(null);
+  const generate = useMutation({
+    mutationFn: () => post<WebhookSecretCreated>(`/integrations/${i.id}/webhook-secret`),
+    onSuccess: (r) => {
+      setConfirmRegenerate(false);
+      setCreated(r);
+      void qc.invalidateQueries({ queryKey: qk.integrations(i.projectId) });
+    },
+    onError: (e) => toast(errorText(e)),
+  });
+  const hook = i.webhook!;
+  const c = i.config as GithubConfig;
+  const syncing = c.syncStatus || c.syncComments;
+  // GitHub Enterprise has its own host; only link the settings page on github.com.
+  const settingsUrl = c.apiBaseUrl ? null : `https://github.com/${c.owner}/${c.repo}/settings/hooks/new`;
+  return (
+    <Section
+      title={`Webhook for ${i.name}`}
+      hint="GitHub tells Snitch when the linked issue is closed, reopened or commented on. Two-way sync needs it."
+      actions={hook.configured ? <span className="pill sent">Secret set</span> : <span className="pill">Not set up</span>}
+    >
+      <div className="stack">
+        {!syncing && (
+          <div className="notice">
+            Two-way sync is off for this integration, so Snitch ignores what the webhook sends.{' '}
+            {!readOnly && (
+              <button type="button" className="link-button" onClick={onEdit}>
+                Turn it on
+              </button>
+            )}
+          </div>
+        )}
+        <div className="stack" style={{ gap: 6 }}>
+          <span className="small muted">Payload URL</span>
+          <Snippet code={hook.url} />
+        </div>
+        <div className="row wrap">
+          <span>Secret: {hook.configured ? 'configured' : 'none yet'}</span>
+          {!readOnly && (
+            <button type="button" className="small" onClick={() => (hook.configured ? setConfirmRegenerate(true) : generate.mutate())} disabled={generate.isPending}>
+              {hook.configured ? 'Regenerate secret' : 'Generate secret'}
+            </button>
+          )}
+        </div>
+        <ol className="steps">
+          <li>
+            On GitHub, open{' '}
+            {settingsUrl ? (
+              <a href={settingsUrl} target="_blank" rel="noreferrer">
+                {c.owner}/{c.repo} <External className="icon-inline" />
+              </a>
+            ) : (
+              <strong>
+                {c.owner}/{c.repo}
+              </strong>
+            )}{' '}
+            → Settings → Webhooks → Add webhook.
+          </li>
+          <li>
+            Payload URL: <code>{hook.url}</code>
+          </li>
+          <li>
+            Content type: <code>application/json</code>
+          </li>
+          <li>Secret: the secret generated here.</li>
+          <li>
+            Which events: “Let me select individual events”, then tick <strong>Issues</strong> and <strong>Issue comments</strong>.
+          </li>
+          <li>Add webhook. GitHub sends a ping, and its deliveries show up under Recent Deliveries.</li>
+        </ol>
+      </div>
+      {confirmRegenerate && (
+        <Dialog
+          title="Regenerate the webhook secret?"
+          onClose={() => setConfirmRegenerate(false)}
+          footer={
+            <>
+              <button type="button" onClick={() => setConfirmRegenerate(false)}>
+                Cancel
+              </button>
+              <button type="button" className="primary" onClick={() => generate.mutate()} disabled={generate.isPending}>
+                Regenerate
+              </button>
+            </>
+          }
+        >
+          <p style={{ margin: 0 }}>The current secret stops working right away: the existing GitHub webhook fails until you paste the new secret into it.</p>
+        </Dialog>
+      )}
+      {created && (
+        <Dialog
+          title="Webhook secret"
+          onClose={() => setCreated(null)}
+          footer={
+            <button type="button" className="primary" onClick={() => setCreated(null)}>
+              Done
+            </button>
+          }
+        >
+          <div className="stack">
+            <div className="secret-box">{created.secret}</div>
+            <span className="muted small">Copy it now and paste it into the webhook's Secret field on GitHub. It won't be shown again.</span>
+            <CopyButton text={created.secret} label="Copy secret" />
+          </div>
+        </Dialog>
+      )}
+    </Section>
   );
 }
 
@@ -787,9 +998,18 @@ function General({ project, readOnly }: { project: ProjectView; readOnly: boolea
   const [types, setTypes] = useState<ReportTypeOption[]>(project.reportTypes);
   const [appIds, setAppIds] = useState((project.allowedAppIds ?? []).join(', '));
   const [retention, setRetention] = useState(project.retentionDays === null ? '' : String(project.retentionDays));
+  const [notifyAssignees, setNotifyAssignees] = useState(project.notifyAssignees);
+  const [notifyReporters, setNotifyReporters] = useState(project.notifyReporters);
+  const server = useServerInfo();
   const dirty = useMemo(
-    () => name !== project.name || JSON.stringify(types) !== JSON.stringify(project.reportTypes) || appIds !== (project.allowedAppIds ?? []).join(', ') || retention !== (project.retentionDays === null ? '' : String(project.retentionDays)),
-    [name, types, appIds, retention, project],
+    () =>
+      name !== project.name ||
+      JSON.stringify(types) !== JSON.stringify(project.reportTypes) ||
+      appIds !== (project.allowedAppIds ?? []).join(', ') ||
+      retention !== (project.retentionDays === null ? '' : String(project.retentionDays)) ||
+      notifyAssignees !== project.notifyAssignees ||
+      notifyReporters !== project.notifyReporters,
+    [name, types, appIds, retention, notifyAssignees, notifyReporters, project],
   );
   const save = useMutation({
     mutationFn: () => {
@@ -799,6 +1019,8 @@ function General({ project, readOnly }: { project: ProjectView; readOnly: boolea
         reportTypes: types.map((t) => ({ id: t.id.trim(), label: t.label.trim() })),
         allowedAppIds: ids.length ? ids : null,
         retentionDays: retention.trim() === '' ? null : Number(retention),
+        notifyAssignees,
+        notifyReporters,
       });
     },
     onSuccess: () => (void qc.invalidateQueries({ queryKey: qk.projects }), toast('Saved')),
@@ -821,6 +1043,25 @@ function General({ project, readOnly }: { project: ProjectView; readOnly: boolea
             Keep tickets for (days)
             <input type="number" min={1} max={3650} value={retention} onChange={(e) => setRetention(e.target.value)} disabled={readOnly} placeholder="Server default" />
             <span className="field-hint">Older tickets are deleted with their screenshots and videos.</span>
+          </label>
+        </div>
+      </Section>
+      <Section title="Notifications" hint="Emails Snitch sends on its own, besides email integrations.">
+        <div className="stack">
+          {server.data?.mail === 'console' && <div className="notice warn">Email is not configured on this server (set SNITCH_SMTP_URL), so these emails only go to the server log.</div>}
+          <label className="check block">
+            <input type="checkbox" checked={notifyAssignees} onChange={(e) => setNotifyAssignees(e.target.checked)} disabled={readOnly} />
+            <span>
+              Email members when a ticket is assigned to them
+              <span className="field-hint">Sent to the address they sign in with.</span>
+            </span>
+          </label>
+          <label className="check block">
+            <input type="checkbox" checked={notifyReporters} onChange={(e) => setNotifyReporters(e.target.checked)} disabled={readOnly} />
+            <span>
+              Email testers when their ticket is resolved
+              <span className="field-hint">Only testers who left an address on the report; the email names the build it's fixed in.</span>
+            </span>
           </label>
         </div>
       </Section>
