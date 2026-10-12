@@ -9,6 +9,8 @@ import {
   SdkConfig,
   isRetryable,
   mergeSdkConfig,
+  parseContentRange,
+  parseTimeline,
 } from '../src';
 
 const fixture = (name: string): unknown => JSON.parse(readFileSync(join(__dirname, '..', 'fixtures', name), 'utf8'));
@@ -81,5 +83,52 @@ describe('isRetryable', () => {
     [422, 'invalid_request', false],
   ] as const)('%i %s → %s', (status, code, expected) => {
     expect(isRetryable(status, code)).toBe(expected);
+  });
+});
+
+describe('chunked upload helpers', () => {
+  it('parses a Content-Range header', () => {
+    expect(parseContentRange('bytes 0-1048575/3000000')).toEqual({ start: 0, end: 1048575, total: 3000000 });
+    expect(parseContentRange(' bytes 5-5/6 ')).toEqual({ start: 5, end: 5, total: 6 });
+  });
+
+  it('rejects malformed or impossible ranges', () => {
+    for (const h of [undefined, '', 'bytes */100', 'bytes 10-5/100', 'bytes 0-100/100', 'items 0-1/2', 'bytes 0-1/2/3', 'bytes -1-2/3']) {
+      expect(parseContentRange(h)).toBeNull();
+    }
+  });
+
+  it('resumable created fixture matches the schema', () => {
+    expect(ReportCreated.safeParse(fixture('report.created.resumable.json')).success).toBe(true);
+  });
+
+  it('treats range_mismatch as retryable', () => {
+    expect(isRetryable(409, 'range_mismatch')).toBe(true);
+    expect(isRetryable(409, 'conflict')).toBe(false);
+  });
+});
+
+describe('timeline', () => {
+  const text = readFileSync(join(__dirname, '..', 'fixtures', 'timeline.ndjson'), 'utf8');
+
+  it('parses the fixture leniently', () => {
+    const t = parseTimeline(text);
+    expect(t.meta?.videoStart).toBe(1791381287120);
+    expect(t.events).toHaveLength(10);
+    expect(t.skipped).toBe(2);
+    expect(t.events.map((e) => e.t)).toEqual([...t.events.map((e) => e.t)].sort((a, b) => a - b));
+  });
+
+  it('sorts events by time', () => {
+    const t = parseTimeline('{"k":"app","t":5,"event":"background"}\n{"k":"app","t":2,"event":"foreground"}\n');
+    expect(t.meta).toBeNull();
+    expect(t.events.map((e) => e.t)).toEqual([2, 5]);
+  });
+
+  it('keeps timeline settings when merging config overrides', () => {
+    const out = mergeSdkConfig(DEFAULT_SDK_CONFIG, { timeline: { network: false } }, { crashPrompt: false });
+    expect(out.timeline).toEqual({ console: true, network: false, screens: true });
+    expect(out.crashPrompt).toBe(false);
+    expect(DEFAULT_SDK_CONFIG.timeline.network).toBe(true);
   });
 });

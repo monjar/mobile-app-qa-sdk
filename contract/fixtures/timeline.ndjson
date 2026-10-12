@@ -1,0 +1,13 @@
+{"k":"meta","v":1,"platform":"ios","start":1791381002120,"end":1791381302120,"videoStart":1791381287120,"videoEnd":1791381302120,"dropped":0}
+{"k":"app","t":1791381002120,"event":"launch"}
+{"k":"screen","t":1791381003010,"name":"onboarding","src":"app"}
+{"k":"log","t":1791381003500,"level":"info","src":"js","msg":"[boot] theme restored in 41 ms"}
+{"k":"net","t":1791381004000,"method":"POST","url":"https://api.mochiro.app/v1/conversation?session=*","status":200,"ms":812.4,"reqBytes":412,"resBytes":20311}
+{"k":"screen","t":1791381090000,"name":"index","src":"app"}
+{"k":"touch","t":1791381290000,"x":0.52,"y":0.61,"n":1}
+{"k":"log","t":1791381295000,"level":"warn","src":"native","msg":"Task <8F1C…> finished with error [-1001] The request timed out.","tag":"com.apple.network"}
+{"k":"net","t":1791381296000,"method":"GET","url":"https://api.mochiro.app/v1/facts","ms":30001,"error":"The request timed out."}
+{"k":"app","t":1791381299000,"event":"background"}
+{"k":"future-kind","t":1791381300000,"note":"readers skip kinds they don't know"}
+not json at all
+{"k":"log","t":1791381301000,"level":"error","src":"js","msg":"TypeError: undefined is not an object (evaluating 'turn.reply')"}

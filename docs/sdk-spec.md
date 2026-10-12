@@ -5,7 +5,7 @@ implementations follow. The wire contract lives in `contract/` (zod schemas,
 fixtures) and the pure logic is pinned by the vectors in `contract/vectors/`;
 where this document and those disagree, the contract wins.
 
-Version: 0.1.0. Names: product **Snitch**, SwiftPM module `Snitch`, Android
+Version: 0.3.0 (§11 lists what 0.3 added). Names: product **Snitch**, SwiftPM module `Snitch`, Android
 package `io.github.monjar.snitch`, npm `react-native-snitch`.
 
 ---
@@ -43,6 +43,11 @@ package `io.github.monjar.snitch`, npm `react-native-snitch`.
 | Longest clip offered | `VideoMaxSeconds` | `io.github.monjar.snitch.VIDEO_MAX_SECONDS` | int 1–30 | 30 |
 | One-time tester notice | `ShowTesterNotice` | `io.github.monjar.snitch.SHOW_TESTER_NOTICE` | bool | true |
 | Release type override | — | `io.github.monjar.snitch.RELEASE_TYPE` | release type | unset |
+| Console lines in the timeline (§11.4) | `CaptureConsole` | `io.github.monjar.snitch.CAPTURE_CONSOLE` | bool | true |
+| HTTP requests in the timeline (§11.5) | `CaptureNetwork` | `io.github.monjar.snitch.CAPTURE_NETWORK` | bool | **false** |
+| Screen changes in the timeline (§11.6) | `TrackScreens` | `io.github.monjar.snitch.TRACK_SCREENS` | bool | true |
+| Offer to report an unexpected exit (§11.8) | `CrashPrompt` | `io.github.monjar.snitch.CRASH_PROMPT` | bool | true |
+| Diagnostic ping when the release type is `unknown` (§11.1) | `CheckInWhenInactive` | `io.github.monjar.snitch.CHECKIN_WHEN_INACTIVE` | bool | false |
 
 Native apps may pass the same values in code (`Snitch.start(serverURL:ingestKey:options:)`
 / `Snitch.start(context, serverUrl, ingestKey, options)`); code wins over the plist/manifest.
@@ -99,7 +104,19 @@ Classifiers are pure functions; vectors in `contract/vectors/release-type.json`.
 `getInstallerPackageName` (older); override from meta-data `RELEASE_TYPE`.
 
 If the detected type is not in `EnabledReleaseTypes`, `start()` returns after
-logging one info line. Nothing is installed, no network traffic happens.
+logging one info line. Nothing is installed, no network traffic happens. The one
+exception is the opt-in `CheckInWhenInactive` ping for `unknown` (§11.1).
+
+### 3.1 Signals summary
+
+Every check-in (§11.1) carries the signals behind the decision as `key=value`
+pairs joined by `;`, in this order, so a misdetected build can be diagnosed from
+the dashboard and turned into a vector:
+
+- iOS: `sim=0|1;profile=none|dev|adhoc|enterprise|other|unreadable;devices=<n>;receipt=none|sandboxReceipt|receipt;at=none|pending|sandbox|production|xcode|failed`
+  (`profile`: `dev` when get-task-allow, else `enterprise` when ProvisionsAllDevices,
+  else `adhoc` when it lists devices, else `other`; `at` is the AppTransaction state).
+- Android: `debuggable=0|1;installer=<package>|none;override=<type>|none`.
 
 ## 4. Trigger
 
@@ -510,3 +527,177 @@ properties `debug.snitch.*`):
 - **Pure logic** (`detector`, `governor`, `ring`, `clipSchedule`, release-type
   classifiers) has no platform imports so it is unit-testable against the vectors:
   Swift in `ios/Sources/Snitch/Logic/`, Kotlin in `android/snitch/src/main/java/io/github/monjar/snitch/logic/`.
+
+## 11. Additions in 0.3
+
+Everything here degrades gracefully against a 0.2 server: the SDK checks
+`features` in the remote config (`SERVER_FEATURES`) or `upload` in the create
+response before using anything an old server would reject.
+
+### 11.1 Check-in (Devices page)
+
+- `installId`: a random UUID v4 created on first activation and stored with the
+  SDK's preferences (`snitch.installId` in UserDefaults / SharedPreferences
+  `snitch`). Not derived from any device identifier; a reinstall gets a new one.
+- Every remote-config fetch adds `installId`, `appId`, `sdkVersion`, `wrapper`
+  (when wrapped), `model`, `signals` (§3.1) and `active=1` to the query. The
+  server records the latest values per install. Reports carry the same `installId`.
+- `CheckInWhenInactive` (default false): when the final release type is
+  `unknown` (iOS: after the AppTransaction retries gave up), send ONE config
+  fetch per launch with `releaseType=unknown&active=0` plus the fields above, and
+  ignore the answer. This is the only request an inert SDK ever makes, and it
+  only happens when the app opted in. `appstore`/`play` builds never ping.
+
+### 11.2 Chunked, resumable attachment upload
+
+Applies when the create response has `upload.resumable == true` (servers with
+`resumable-upload`). The outbox state gains `resumable`, `chunkBytes` (clamped to
+`CHUNK_BYTES_MIN…MAX`) and `offsets: {name: receivedBytes}` (from the create
+response's `receivedBytes`, then after every chunk), persisted after each step.
+
+For each attachment not yet stored:
+- size ≤ chunkBytes, or not resumable → one whole-file PUT as in §7.3.
+- otherwise, from `start = offsets[name] ?? 0`, send
+  `end = min(start + chunkBytes, size) − 1` with `Content-Range: bytes start-end/size`,
+  `Content-Length`, `X-Content-SHA256` (whole file), `X-Chunk-SHA256` (this chunk),
+  reading only that byte range from the file.
+  - 202 → `offsets[name] = receivedBytes`, persist, next chunk.
+  - 201 → stored.
+  - 409 `range_mismatch` → `offsets[name] = details.receivedBytes`, persist,
+    continue (at most 3 mismatches per pass, then back off).
+  - 422 `hash_mismatch` with `details.chunk` → back off (the bytes changed on the
+    wire; the next pass resends the chunk).
+  - 422 `hash_mismatch` without `chunk` → `offsets[name] = 0`, `restarts += 1`;
+    a second whole-file failure drops the report (§7.3 drop rules).
+  - everything else → §7.3.
+- A 404 that restarts the report clears `offsets`.
+
+### 11.3 Timeline
+
+An in-memory recorder with one ring per kind (`TIMELINE_LIMITS` in
+`contract/src/timeline.ts`: 500 log lines, 100 requests, 50 screens, 300 touch
+downs, 50 app events; nothing older than 5 minutes). Events store wall-clock
+epoch ms when they happen. Touch downs come from the touch log (monotonic ms),
+converted with `wall = mono + (wallNow − monoNow)` taken once at freeze time.
+
+At Send the recorder is frozen (with the capture) and written as the `timeline`
+attachment, `application/x-ndjson`: a `meta` line, then the events in time
+order. `meta.videoStart`/`videoEnd` are the wall-clock times of the composed
+clip (`videoEnd = wall(endT)`, `videoStart = videoEnd − durationMs`). Lines are
+kept under the 2 MB cap by dropping the oldest log lines first. App events:
+`launch` (first activation), `foreground`, `background`, `memory_warning`.
+The report's `screen` field is the newest screen event's name.
+
+Every kind follows the remote `timeline` switches AND the static options:
+`console` needs `CaptureConsole`, `network` needs `CaptureNetwork`, `screens`
+needs `TrackScreens`. Touches and app events are always recorded while capture runs.
+Nothing is recorded while Snitch is off, and nothing leaves the device unless a report is sent.
+
+### 11.4 Console capture
+
+- `Snitch.log` lines: source `app` (they also still go to `logs.txt`).
+- iOS, at Send (on the report queue, ≤ 2 s budget, then stop reading):
+  `OSLogStore(scope: .currentProcessIdentifier)` entries of the last 5 minutes,
+  `OSLogEntryLog` only, newest 300, excluding the subsystem
+  `io.github.monjar.snitch`; source `native`, `tag` = subsystem (or category).
+  Levels: debug→debug, info/notice→info, error→error, fault→error.
+- React Native iOS: when Snitch activates with console on, the RN module calls
+  `RCTSetLogThreshold(min(current, RCTLogLevelInfo))` and `RCTAddLogFunction`;
+  lines with `RCTLogSourceJavaScript` become source `js` (info/warn/error by RN
+  level). os_log entries of subsystem `com.facebook.react.log` are then skipped
+  so JS lines aren't counted twice. Store builds (inert SDK) are untouched.
+- Android, at Send (≤ 2 s): `logcat -d -v epoch -t 500 --pid=<myPid>`, parsed
+  (`V/D`→debug, `I`→info, `W`→warn, `E/F/A`→error); tag `ReactNativeJS` → source
+  `js`, tag `Snitch` skipped, everything else source `logcat`.
+
+### 11.5 Network capture (opt-in: `CaptureNetwork`)
+
+Records method, `sanitizeUrl(url)` (vectors: `contract/vectors/url-sanitize.json`),
+status, duration, request/response byte counts and the error text. Never
+headers or bodies. Requests to the Snitch server itself are never recorded.
+
+- iOS: `SnitchURLProtocol`, a forwarding `URLProtocol`: it re-issues the request on
+  its own `URLSession` (default configuration, shared cookies and cache, without
+  itself) and relays response, data chunks as they arrive (streaming keeps
+  working), redirects, auth challenges and errors to its client. Installed by
+  `URLProtocol.registerClass` on activation (covers `URLSession.shared`), and for
+  custom sessions by `Snitch.captureNetwork(in: URLSessionConfiguration)`.
+  React Native: the RN module sets `RCTSetCustomNSURLSessionConfigurationProvider`
+  at `+load` when `CaptureNetwork` is true in Info.plist; the provider returns
+  React Native's default configuration (cookies as RN sets them, honouring
+  `ReactNetworkForceWifiOnly`) with `SnitchURLProtocol` first in `protocolClasses`.
+  RN builds its session once, possibly before Snitch has activated, so the gate is
+  `canInit(with:)`: it answers false unless Snitch is active with network capture
+  on, the request is http(s), not for the Snitch server, and not already being
+  forwarded. An inert SDK (store build) therefore never touches a request.
+  Not covered: sessions the app or other libraries create themselves without
+  `captureNetwork(in:)` (e.g. `expo/fetch`).
+- Android: `SnitchOkHttpInterceptor` (OkHttp is a compileOnly dependency; the
+  class is only loaded when used) and `Snitch.recordNetwork(…)` for any other
+  client. React Native: the RN module's init provider calls
+  `OkHttpClientProvider.setOkHttpClientFactory` (RN's builder plus the
+  interceptor) when `CAPTURE_NETWORK` is true. An app that sets its own factory
+  replaces it.
+
+### 11.6 Screens
+
+- `Snitch.setScreen(name)` (Swift, Kotlin, JS): source `app`. Once the app has
+  called it, native inference stops for the rest of the process.
+- iOS inference (`TrackScreens`): on touch-down and on foreground, the top view
+  controller of the key window (presented → navigation visible → tab selected →
+  last child), named by `title`, else `navigationItem.title`, else its class name
+  without the module prefix; recorded only when it changes.
+- Android inference: `ActivityLifecycleCallbacks.onActivityResumed` → activity
+  `title` if set and different from the app label, else the class simple name.
+- React Native JS: `useSnitchScreen(name)` (e.g. `useSnitchScreen(usePathname())`
+  in an expo-router root layout), and `trackNavigationContainer(ref)` for React
+  Navigation. No dependency on either router.
+
+### 11.7 Screenshot markup
+
+Tapping the thumbnail in the sheet opens an editor over the screenshot: Arrow,
+Box and Blur (pixelate, 16-pixel blocks in image pixels) tools, Undo, Clear,
+Cancel and Done. Strokes are red (#FF3B30), 4 pt / dp scaled to image pixels.
+Done renders the marks into the image (JPEG 0.8) and replaces the screenshot.
+Blur is applied to the pixels, so blurred content is not recoverable from the file.
+
+### 11.8 Crash follow-up (`CrashPrompt`, server feature `trigger-crash`)
+
+- iOS: a MetricKit subscriber (`MXMetricManager.shared.add`) on activation; each
+  `MXCrashDiagnostic` in a delivered payload is saved (its `jsonRepresentation()`,
+  ≤ 512 KB) under `Application Support/Snitch/crash/`.
+- Android: a chained default uncaught-exception handler writes the thread name,
+  stack trace and causes (≤ 256 KB) to `noBackupFilesDir/snitch/crash/` before
+  calling the previous handler; on API 30+, `getHistoricalProcessExitReasons`
+  newer than the last one handled adds native crashes and ANRs (description +
+  the first 512 KB of `traceInputStream`).
+- While active, the timeline's log ring is saved every 30 s and on background
+  (`session-log.ndjson`, ≤ 200 lines); at launch the previous file becomes the
+  previous session's log. Android also keeps the previous pid and, at report time,
+  reads `logcat --pid=<previous pid>` while the buffer still has it.
+- On activation, once the remote config lists `trigger-crash` and `crashPrompt`
+  is on: if a crash from the last 7 days is pending, show the pill
+  "The app closed unexpectedly. Report it?" once per launch. It opens the sheet
+  with trigger `crash`, type `bug`, no video, screenshot unticked; Send attaches
+  `crash` (`text/plain`, the saved diagnostic) and the previous session's log as
+  the `timeline`. Sending or dismissing the pill deletes the pending crash files.
+  The video is gone: frames live only in memory.
+
+### 11.9 Public API additions
+
+- Swift: `Snitch.setScreen(_ name: String?)`, `Snitch.captureNetwork(in: URLSessionConfiguration)`;
+  `SnitchOptions` gains `captureConsole`, `captureNetwork`, `trackScreens`,
+  `crashPrompt`, `checkInWhenInactive`. Bridge: `SnitchBridge.setScreen(_:)`,
+  `SnitchBridge.logJS(_ message: String, level: String)`, `SnitchBridge.isActive()`,
+  `SnitchBridge.networkProtocolClass()`, notification `SnitchDidActivate`.
+- Kotlin: `Snitch.setScreen(name: String?)`, `Snitch.recordNetwork(method, url,
+  status, durationMs, requestBytes, responseBytes, error)`, `SnitchOkHttpInterceptor()`;
+  same `SnitchOptions` fields.
+- JS: `Snitch.setScreen(name)`, `useSnitchScreen(name)`, `trackNavigationContainer(ref)`.
+
+### 11.10 Debug hooks
+
+| Variable | Effect |
+|---|---|
+| `SNITCH_DEBUG_CHUNK_BYTES=<n>` | caps the chunk size the SDK uses (still clamped to the contract minimum), so CI exercises chunked upload with small files |
+

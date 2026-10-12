@@ -1,0 +1,100 @@
+{
+  "description": "sanitizeUrl (contract/src/timeline.ts): what a timeline network event stores as its url. SDKs must produce exactly `out` for `in`. Lengths count UTF-16 code units.",
+  "cases": [
+    {
+      "name": "plain https",
+      "in": "https://api.example.com/v1/items",
+      "out": "https://api.example.com/v1/items"
+    },
+    {
+      "name": "no path",
+      "in": "https://api.example.com",
+      "out": "https://api.example.com/"
+    },
+    {
+      "name": "query values hidden, names kept in order",
+      "in": "https://a.example/search?q=secret&page=2&q=again",
+      "out": "https://a.example/search?q=*&page=*&q=*"
+    },
+    {
+      "name": "query name without value",
+      "in": "https://a.example/x?flag&b=1",
+      "out": "https://a.example/x?flag=*&b=*"
+    },
+    {
+      "name": "empty query parts skipped",
+      "in": "https://a.example/x?&&a=1&",
+      "out": "https://a.example/x?a=*"
+    },
+    {
+      "name": "bare question mark",
+      "in": "https://a.example/x?",
+      "out": "https://a.example/x"
+    },
+    {
+      "name": "fragment dropped",
+      "in": "https://a.example/p#section?x=1",
+      "out": "https://a.example/p"
+    },
+    {
+      "name": "credentials dropped",
+      "in": "https://user:pa%40ss@a.example:8443/p?token=abc",
+      "out": "https://a.example:8443/p?token=*"
+    },
+    {
+      "name": "host lowercased, path kept as sent",
+      "in": "HTTP://API.Example.COM/Path/%20Space/../x",
+      "out": "http://api.example.com/Path/%20Space/../x"
+    },
+    {
+      "name": "query straight after host",
+      "in": "https://a.example?x=1",
+      "out": "https://a.example/?x=*"
+    },
+    {
+      "name": "ip and port",
+      "in": "http://10.0.2.2:8080/api/v1/reports",
+      "out": "http://10.0.2.2:8080/api/v1/reports"
+    },
+    {
+      "name": "ipv6 literal",
+      "in": "http://[::1]:8080/health",
+      "out": "http://[::1]:8080/health"
+    },
+    {
+      "name": "data url",
+      "in": "data:image/png;base64,AAAA",
+      "out": "data:…"
+    },
+    {
+      "name": "file url",
+      "in": "file:///var/mobile/x.json",
+      "out": "file:…"
+    },
+    {
+      "name": "no scheme",
+      "in": "/relative/path?x=1",
+      "out": "…"
+    },
+    {
+      "name": "http without slashes",
+      "in": "http:example.com",
+      "out": "http:…"
+    },
+    {
+      "name": "empty authority",
+      "in": "https:///path",
+      "out": "https:…"
+    },
+    {
+      "name": "equals inside value",
+      "in": "https://a.example/x?sig=a=b=c",
+      "out": "https://a.example/x?sig=*"
+    },
+    {
+      "name": "long url cut to 500 UTF-16 code units, ending in an ellipsis",
+      "in": "https://a.example/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?k=v",
+      "out": "https://a.example/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa…"
+    }
+  ]
+}

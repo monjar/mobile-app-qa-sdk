@@ -38,8 +38,12 @@ export const UPLOAD_STATES = ['pending', 'complete', 'incomplete'] as const;
 export const UploadState = z.enum(UPLOAD_STATES);
 export type UploadState = z.infer<typeof UploadState>;
 
-/** What opened the report sheet. */
-export const TRIGGERS = ['gesture', 'screenshot', 'shake', 'api'] as const;
+/**
+ * What opened the report sheet. `crash` is the follow-up offered on the launch
+ * after an unexpected exit; SDKs only send it to servers that list the
+ * `trigger-crash` feature (older servers reject unknown triggers).
+ */
+export const TRIGGERS = ['gesture', 'screenshot', 'shake', 'api', 'crash'] as const;
 export const Trigger = z.enum(TRIGGERS);
 export type Trigger = z.infer<typeof Trigger>;
 
@@ -79,6 +83,7 @@ export const ATTACHMENT_LIMITS = {
   'image/png': 8 * 1024 * 1024,
   'video/mp4': 30 * 1024 * 1024,
   'text/plain': 2 * 1024 * 1024,
+  /** The report timeline (contract/src/timeline.ts). */
   'application/x-ndjson': 2 * 1024 * 1024,
 } as const satisfies Record<string, number>;
 export type AttachmentContentType = keyof typeof ATTACHMENT_LIMITS;
@@ -86,3 +91,18 @@ export const ATTACHMENT_CONTENT_TYPES = Object.keys(ATTACHMENT_LIMITS) as [Attac
 
 /** The longest clip a report may carry. */
 export const MAX_VIDEO_SECONDS = 30;
+
+/** Most attachments one report may declare (screenshot, video, logs, timeline, crash, and room to grow). */
+export const MAX_ATTACHMENTS = 8;
+
+/**
+ * What a server can do beyond the 0.1 protocol, listed in the remote config's
+ * `features`. SDKs check this before using anything an older server would reject.
+ *
+ * - resumable-upload — attachment PUTs accept Content-Range chunks (§ chunked upload in ingest.ts)
+ * - timeline         — the server parses and shows the `timeline` attachment
+ * - trigger-crash    — ReportCreate.trigger may be `crash`
+ * - checkin          — config fetches carrying installId are recorded as device check-ins
+ */
+export const SERVER_FEATURES = ['resumable-upload', 'timeline', 'trigger-crash', 'checkin'] as const;
+export type ServerFeature = (typeof SERVER_FEATURES)[number];

@@ -13,6 +13,7 @@ import {
   type DetectorEvent,
   type GovernorInput,
 } from '../src/logic';
+import { sanitizeUrl } from '../src/timeline';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const vectors = (name: string): any => JSON.parse(readFileSync(join(__dirname, '..', 'vectors', name), 'utf8'));
@@ -90,4 +91,11 @@ describe('release type vectors', () => {
   const v = vectors('release-type.json');
   for (const c of v.ios) it(`ios: ${c.name}`, () => expect(classifyIos(c.signals)).toBe(c.expect));
   for (const c of v.android) it(`android: ${c.name}`, () => expect(classifyAndroid(c.signals)).toBe(c.expect));
+});
+
+describe('url-sanitize vectors', () => {
+  const v = vectors('url-sanitize.json');
+  for (const c of v.cases) {
+    it(c.name, () => expect(sanitizeUrl(c.in)).toBe(c.out));
+  }
 });
