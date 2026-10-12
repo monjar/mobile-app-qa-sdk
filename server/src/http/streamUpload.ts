@@ -4,7 +4,7 @@
  * what the client declared.
  */
 import { createHash } from 'node:crypto';
-import { createWriteStream } from 'node:fs';
+import { createReadStream, createWriteStream } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -42,6 +42,24 @@ export async function streamToFile(body: ReadableStream<Uint8Array> | null, path
     throw new HttpError(422, 'invalid_request', 'Upload was interrupted');
   }
   return { size, sha256: hash.digest('hex'), head };
+}
+
+/** Hashes a file on disk the way streamToFile hashes a body (for an assembled chunked upload). */
+export async function hashFile(path: string): Promise<StreamedFile> {
+  const hash = createHash('sha256');
+  let size = 0;
+  let head = Buffer.alloc(0);
+  for await (const chunk of createReadStream(path) as AsyncIterable<Buffer>) {
+    size += chunk.length;
+    if (head.length < 16) head = Buffer.concat([head, chunk.subarray(0, 16 - head.length)]);
+    hash.update(chunk);
+  }
+  return { size, sha256: hash.digest('hex'), head };
+}
+
+/** Appends a whole file to another (creating it), streaming. */
+export async function appendFileTo(source: string, dest: string): Promise<void> {
+  await pipeline(createReadStream(source), createWriteStream(dest, { flags: 'a', mode: 0o600 }));
 }
 
 /** Whether the first bytes look like the declared type. Text types are not sniffed. */

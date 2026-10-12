@@ -13,6 +13,8 @@ import type { AuditRepo, SessionsRepo, UsersRepo } from './repo/users';
 import type { TicketsRepo } from './repo/tickets';
 import type { IntegrationsRepo } from './repo/integrations';
 import type { JobsRepo } from './repo/jobs';
+import type { InstallsRepo } from './repo/installs';
+import type { SettingsRepo } from './repo/settings';
 import type { RateLimiter } from './http/rateLimit';
 
 export interface Limiters {
@@ -21,6 +23,8 @@ export interface Limiters {
   configPerIp: RateLimiter;
   loginPerIp: RateLimiter;
   loginPerEmail: RateLimiter;
+  /** Inbound GitHub webhooks, per client IP. */
+  hooksPerIp: RateLimiter;
 }
 
 export interface Deps {
@@ -30,6 +34,8 @@ export interface Deps {
   box: SecretBox;
   mailer: Mailer;
   blobs: BlobStore;
+  /** Where scheduled backups go: the SNITCH_BACKUP_S3_* bucket, or `blobs`. */
+  backupStore: BlobStore;
   /** Outbound HTTP (GitHub, webhooks). Injected so tests can fake it. */
   fetch: typeof fetch;
   /** Resolves a hostname for the webhook SSRF guard. Injected for tests. */
@@ -41,6 +47,8 @@ export interface Deps {
   tickets: TicketsRepo;
   integrations: IntegrationsRepo;
   jobs: JobsRepo;
+  installs: InstallsRepo;
+  settings: SettingsRepo;
   limiters: Limiters;
   /** Nudges the worker to run now (e.g. right after a report completes). */
   wake: () => void;

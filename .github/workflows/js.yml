@@ -62,7 +62,7 @@ jobs:
         run: |
           printf '%s' '{"identities":[{"name":"snitch","credentials":[{"accessKey":"snitchtest","secretKey":"snitchtestsecret"}],"actions":["Admin","Read","Write","List","Tagging"]}]}' > "$RUNNER_TEMP/s3.json"
           docker run -d --name seaweedfs -p 8333:8333 -v "$RUNNER_TEMP/s3.json:/etc/seaweedfs/s3.json:ro" \
-            chrislusf/seaweedfs:4.48 server -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json
+            chrislusf/seaweedfs:4.48 server -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -volume.max=32
           # An unsigned request gets 403 once the S3 API is up.
           for i in $(seq 1 60); do
             code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8333/ || true)

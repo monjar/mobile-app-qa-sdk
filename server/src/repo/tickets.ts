@@ -51,6 +51,10 @@ export interface TicketRow {
   metadata_json: string;
   assignee_user_id: string | null;
   duplicate_of_id: string | null;
+  /** The check-in installId the report came from (feature `checkin`). */
+  install_id: string | null;
+  screen: string | null;
+  fixed_in: string | null;
   reported_at: number;
   created_at: number;
   completed_at: number | null;
@@ -71,6 +75,8 @@ export interface AttachmentRow {
   height: number | null;
   duration_ms: number | null;
   state: 'missing' | 'stored';
+  /** Verified bytes of a chunked upload in progress. */
+  received_bytes: number;
   created_at: number;
   stored_at: number | null;
 }
@@ -99,7 +105,11 @@ export function ticketKey(prefix: string, n: number): string {
   return `${prefix}-${n}`;
 }
 
-const OPEN_STATUSES: TicketStatus[] = ['new', 'triaged', 'in_progress'];
+export const OPEN_STATUSES: readonly TicketStatus[] = ['new', 'triaged', 'in_progress'];
+
+export function isOpenStatus(s: TicketStatus): boolean {
+  return OPEN_STATUSES.includes(s);
+}
 
 export class TicketsRepo {
   constructor(
@@ -136,8 +146,8 @@ export class TicketsRepo {
         .prepare(
           `INSERT INTO tickets (id, project_id, number, client_report_id, type, title, description, reporter_email, reporter_name, reporter_id,
              platform, release_type, app_id, app_version, app_build, os_version, device_model, sdk_version, trigger, metadata_json,
-             reported_at, created_at, updated_at, upload_state, completed_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             reported_at, created_at, updated_at, upload_state, completed_at, install_id, screen)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           id,
@@ -165,6 +175,8 @@ export class TicketsRepo {
           t,
           report.attachments.length === 0 ? 'complete' : 'pending',
           report.attachments.length === 0 ? t : null,
+          report.installId ?? null,
+          report.screen?.trim() || null,
         );
       const ins = this.db.prepare(
         `INSERT INTO attachments (id, ticket_id, name, content_type, declared_size, declared_sha256, width, height, duration_ms, created_at)
@@ -316,6 +328,8 @@ export class TicketsRepo {
         osVersion: r.os_version,
         hasScreenshot: mine.some((a) => a.content_type.startsWith('image/') && a.state === 'stored'),
         videoSeconds: video?.duration_ms ? Math.round(video.duration_ms / 100) / 10 : null,
+        screen: r.screen,
+        fixedIn: r.fixed_in,
         reporterEmail: r.reporter_email,
         assignee: r.assignee_user_id ? (assignees.get(r.assignee_user_id) ?? null) : null,
         escalations: escs
@@ -329,20 +343,20 @@ export class TicketsRepo {
 
   // ── Changes from the dashboard ───────────────────────────────────────────
 
-  setStatus(id: string, status: TicketStatus, actor: Actor): boolean {
+  /** Returns the `status_changed` event id, or null when the status was already `status`. */
+  setStatus(id: string, status: TicketStatus, actor: Actor): number | null {
     const row = this.get(id);
-    if (!row || row.status === status) return false;
+    if (!row || row.status === status) return null;
     this.db.prepare('UPDATE tickets SET status = ?, updated_at = ? WHERE id = ?').run(status, this.now(), id);
-    this.addEvent(id, actor, 'status_changed', { from: row.status, to: status });
-    return true;
+    return this.addEvent(id, actor, 'status_changed', { from: row.status, to: status });
   }
 
-  setAssignee(id: string, userId: string | null, actor: Actor): boolean {
+  /** Returns the `assigned` event id, or null when nothing changed. */
+  setAssignee(id: string, userId: string | null, actor: Actor): number | null {
     const row = this.get(id);
-    if (!row || row.assignee_user_id === userId) return false;
+    if (!row || row.assignee_user_id === userId) return null;
     this.db.prepare('UPDATE tickets SET assignee_user_id = ?, updated_at = ? WHERE id = ?').run(userId, this.now(), id);
-    this.addEvent(id, actor, 'assigned', { from: row.assignee_user_id, to: userId });
-    return true;
+    return this.addEvent(id, actor, 'assigned', { from: row.assignee_user_id, to: userId });
   }
 
   setType(id: string, type: string, actor: Actor): boolean {
@@ -361,21 +375,46 @@ export class TicketsRepo {
     return true;
   }
 
-  setDuplicateOf(id: string, duplicateOfId: string | null): void {
+  /** Points the ticket at its original; marking (not clearing) writes `duplicate_marked`. Returns whether it changed. */
+  setDuplicateOf(id: string, duplicateOfId: string | null, actor: Actor): boolean {
+    const row = this.get(id);
+    if (!row || row.duplicate_of_id === duplicateOfId) return false;
     this.db.prepare('UPDATE tickets SET duplicate_of_id = ?, updated_at = ? WHERE id = ?').run(duplicateOfId, this.now(), id);
+    if (duplicateOfId !== null) {
+      const original = this.get(duplicateOfId);
+      const prefix = original ? this.projects.get(original.project_id)?.ticketPrefix : undefined;
+      this.addEvent(id, actor, 'duplicate_marked', { duplicateOfId, key: original && prefix ? ticketKey(prefix, original.number) : null });
+    }
+    return true;
+  }
+
+  setFixedIn(id: string, fixedIn: string | null): void {
+    this.db.prepare('UPDATE tickets SET fixed_in = ?, updated_at = ? WHERE id = ?').run(fixedIn, this.now(), id);
   }
 
   touch(id: string): void {
     this.db.prepare('UPDATE tickets SET updated_at = ? WHERE id = ?').run(this.now(), id);
   }
 
-  /** Deletes the ticket rows; returns blob keys the caller must delete from storage. */
-  delete(id: string): string[] {
-    const keys = this.attachments(id)
-      .map((a) => a.storage_key)
-      .filter((k): k is string => !!k);
+  /** Deletes the ticket rows; returns what the caller must delete from storage (blobs and partial uploads). */
+  delete(id: string): { blobKeys: string[]; attachmentIds: string[] } {
+    const atts = this.attachments(id);
     this.db.prepare('DELETE FROM tickets WHERE id = ?').run(id);
-    return keys;
+    return { blobKeys: atts.map((a) => a.storage_key).filter((k): k is string => !!k), attachmentIds: atts.map((a) => a.id) };
+  }
+
+  /**
+   * Open tickets of the same project worth comparing with `t` for "similar
+   * tickets": created within `sinceMs`, newest first, at most `limit`, without
+   * `t` itself and the ticket it already duplicates.
+   */
+  similarCandidates(t: TicketRow, sinceMs: number, limit: number): TicketRow[] {
+    return this.db
+      .prepare(
+        `SELECT * FROM tickets WHERE project_id = ? AND id != ? AND id IS NOT ? AND status IN (${OPEN_STATUSES.map(() => '?').join(',')})
+         AND created_at >= ? ORDER BY created_at DESC, id DESC LIMIT ?`,
+      )
+      .all(t.project_id, t.id, t.duplicate_of_id, ...OPEN_STATUSES, this.now() - sinceMs, limit) as TicketRow[];
   }
 
   /** Ticket ids older than the retention window of their project (or the global default). */
@@ -411,8 +450,29 @@ export class TicketsRepo {
 
   markStored(id: string, sizeBytes: number, sha256: string, storageKey: string): void {
     this.db
-      .prepare("UPDATE attachments SET state = 'stored', size_bytes = ?, sha256 = ?, storage_key = ?, stored_at = ? WHERE id = ?")
-      .run(sizeBytes, sha256, storageKey, this.now(), id);
+      .prepare("UPDATE attachments SET state = 'stored', size_bytes = ?, sha256 = ?, storage_key = ?, stored_at = ?, received_bytes = ? WHERE id = ?")
+      .run(sizeBytes, sha256, storageKey, this.now(), sizeBytes, id);
+  }
+
+  setReceivedBytes(id: string, bytes: number): void {
+    this.db.prepare("UPDATE attachments SET received_bytes = ? WHERE id = ? AND state = 'missing'").run(bytes, id);
+  }
+
+  /** Which of these attachment ids still wait for bytes on a report that is still uploading. */
+  pendingAttachmentIds(ids: string[]): Set<string> {
+    const out = new Set<string>();
+    // Chunked so the IN list stays under SQLite's variable limit.
+    for (let i = 0; i < ids.length; i += 500) {
+      const part = ids.slice(i, i + 500);
+      const rows = this.db
+        .prepare(
+          `SELECT a.id FROM attachments a JOIN tickets t ON t.id = a.ticket_id
+           WHERE a.id IN (${part.map(() => '?').join(',')}) AND a.state = 'missing' AND t.upload_state = 'pending'`,
+        )
+        .all(...part) as { id: string }[];
+      for (const r of rows) out.add(r.id);
+    }
+    return out;
   }
 
   attachmentViews(ticketId: string, publicUrl: string): AttachmentView[] {
@@ -437,10 +497,33 @@ export class TicketsRepo {
 
   // ── Events ───────────────────────────────────────────────────────────────
 
-  addEvent(ticketId: string, actor: Actor, kind: TicketEventKind, data: Record<string, unknown>): void {
-    this.db
+  /** Appends an event and returns its id. */
+  addEvent(ticketId: string, actor: Actor, kind: TicketEventKind, data: Record<string, unknown>): number {
+    const r = this.db
       .prepare('INSERT INTO ticket_events (ticket_id, actor_type, actor_user_id, kind, data_json, created_at) VALUES (?, ?, ?, ?, ?, ?)')
       .run(ticketId, actor.type, actor.type === 'user' ? actor.userId : null, kind, toJson(data), this.now());
+    return Number(r.lastInsertRowid);
+  }
+
+  /**
+   * Appends an event mirroring something outside Snitch, once per `externalId`
+   * (a redelivered webhook is a no-op). Returns the new event id, or null if
+   * it was already recorded.
+   */
+  addExternalEvent(ticketId: string, actor: Actor, kind: TicketEventKind, data: Record<string, unknown>, externalId: string): number | null {
+    const r = this.db
+      .prepare(
+        'INSERT OR IGNORE INTO ticket_events (ticket_id, actor_type, actor_user_id, kind, data_json, created_at, external_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      )
+      .run(ticketId, actor.type, actor.type === 'user' ? actor.userId : null, kind, toJson(data), this.now(), externalId);
+    return r.changes ? Number(r.lastInsertRowid) : null;
+  }
+
+  event(id: number): { id: number; ticket_id: string; kind: TicketEventKind; actor_user_id: string | null; data: Record<string, unknown> } | null {
+    const r = this.db.prepare('SELECT id, ticket_id, kind, actor_user_id, data_json FROM ticket_events WHERE id = ?').get(id) as
+      | { id: number; ticket_id: string; kind: TicketEventKind; actor_user_id: string | null; data_json: string }
+      | undefined;
+    return r ? { id: r.id, ticket_id: r.ticket_id, kind: r.kind, actor_user_id: r.actor_user_id, data: parseJson(r.data_json, {}) } : null;
   }
 
   events(ticketId: string): TicketEventView[] {

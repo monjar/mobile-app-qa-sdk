@@ -1,9 +1,12 @@
 /**
  * Project settings: projects, ingest keys, remote SDK config, integrations and
- * routing rules. Creating and changing these is admin-only; members can read.
+ * routing rules, plus the Devices page (SDK check-ins). Creating and changing
+ * these is admin-only; members can read.
  */
 import { Hono } from 'hono';
+import { randomBytes } from 'node:crypto';
 import {
+  DeviceListQuery,
   EmailConfig,
   GithubConfig,
   IngestKeyCreate,
@@ -16,13 +19,15 @@ import {
   WebhookConfig,
   type IngestKeyCreated,
   type SdkConfigView,
+  type WebhookSecretCreated,
 } from '@snitch/contract';
 import type { Deps } from '../../deps';
 import type { AppEnv } from '../../http/env';
 import { conflict, HttpError, invalid, notFound } from '../../http/errors';
 import { requireAdmin } from '../../http/session';
-import { jsonBody } from '../../http/validate';
+import { jsonBody, query } from '../../http/validate';
 import type { Project } from '../../repo/projects';
+import { githubHookUrl } from '../../repo/integrations';
 import * as integrations from '../../integrations';
 import { SendError } from '../../integrations';
 import { errorMessage } from '../../log';
@@ -97,6 +102,10 @@ export function projectRoutes(deps: Deps): Hono<AppEnv> {
     return c.json(sdkView(p));
   });
 
+  // ── Devices ──────────────────────────────────────────────────────────────
+
+  app.get('/projects/:id/devices', (c) => c.json(deps.installs.list(getProject(deps, c.req.param('id')).id, query(c, DeviceListQuery))));
+
   // ── Integrations ─────────────────────────────────────────────────────────
 
   app.get('/projects/:id/integrations', (c) => c.json(deps.integrations.list(getProject(deps, c.req.param('id')).id)));
@@ -143,6 +152,17 @@ export function projectRoutes(deps: Deps): Hono<AppEnv> {
       const message = e instanceof SendError ? e.message : errorMessage(e);
       throw new HttpError(422, 'invalid_request', message);
     }
+  });
+
+  // A new secret replaces the old one at once: GitHub must be given the new value.
+  app.post('/integrations/:id/webhook-secret', admin, (c) => {
+    const row = deps.integrations.get(c.req.param('id'));
+    if (!row) throw notFound('No such integration');
+    if (row.kind !== 'github') throw invalid('Only GitHub integrations receive webhooks');
+    const secret = randomBytes(32).toString('hex');
+    deps.integrations.setWebhookSecret(row.id, secret);
+    deps.audit.add(c.get('user').id, 'integration.webhook_secret_created', row.id, { name: row.name }, c.get('ip'));
+    return c.json({ url: githubHookUrl(deps.config.publicUrl, row.id), secret } satisfies WebhookSecretCreated, 201);
   });
 
   // ── Routing ──────────────────────────────────────────────────────────────

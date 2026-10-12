@@ -5,9 +5,10 @@
  */
 import type { Context, MiddlewareHandler } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
-import { CSRF_HEADER } from '@snitch/contract';
+import { CSRF_HEADER, type Me } from '@snitch/contract';
 import type { Deps } from '../deps';
 import { safeEqual } from '../crypto/tokens';
+import { toUserView, type UserRow } from '../repo/users';
 import type { AppEnv } from './env';
 import { forbidden, HttpError, unauthorized } from './errors';
 
@@ -24,6 +25,15 @@ export function setSessionCookie(c: Context, deps: Deps, token: string, expiresA
     path: '/',
     maxAge: Math.max(0, Math.floor((expiresAt - deps.now()) / 1000)),
   });
+}
+
+/** Signs `user` in on this response (every sign-in method ends here) and audits it as `action`. */
+export function startSession(c: Context<AppEnv>, deps: Deps, user: UserRow, action: string): Me {
+  deps.users.recordLogin(user.id);
+  const s = deps.sessions.create(user.id, c.get('ip'), c.req.header('user-agent') ?? null);
+  setSessionCookie(c, deps, s.token, s.expiresAt);
+  deps.audit.add(user.id, action, user.email, {}, c.get('ip'));
+  return { user: toUserView({ ...user, last_login_at: deps.now() }), csrfToken: s.csrfToken };
 }
 
 export function clearSessionCookie(c: Context, deps: Deps): void {

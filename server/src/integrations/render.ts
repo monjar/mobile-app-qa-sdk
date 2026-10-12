@@ -3,6 +3,7 @@
  * chat messages. Everything user-supplied is escaped for its target format.
  */
 import type { TicketMetadata, TicketRow } from '../repo/tickets';
+import type { BeforeReport } from './timeline';
 
 export interface RenderInput {
   key: string;
@@ -15,6 +16,8 @@ export interface RenderInput {
   links: { screenshot?: string; video?: string };
   hasScreenshot: boolean;
   videoSeconds: number | null;
+  /** From the timeline attachment (GitHub and email only; null without one). */
+  beforeReport?: BeforeReport | null;
 }
 
 export function deviceLine(i: RenderInput): string {
@@ -42,6 +45,18 @@ export function metadataRows(i: RenderInput): [string, string][] {
 
 const mdCell = (s: string) => s.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
 
+/** The "Before the report" lines, shared by every format. */
+export function beforeReportLines(b: BeforeReport): string[] {
+  return [...(b.screen ? [`Screen   ${b.screen}`] : []), ...(b.lines.length ? b.lines : ['No errors or failed requests in the timeline.'])];
+}
+
+/** A fenced block that the content can't close early, whatever backticks it holds. */
+function codeBlock(lines: string[]): string {
+  const longest = Math.max(0, ...lines.flatMap((l) => [...l.matchAll(/`+/g)].map((m) => m[0].length)));
+  const fence = '`'.repeat(Math.max(3, longest + 1));
+  return [`${fence}text`, ...lines, fence].join('\n');
+}
+
 export const GITHUB_MARKER = (ticketId: string) => `<!-- snitch:ticket=${ticketId} -->`;
 
 export function githubIssue(i: RenderInput): { title: string; body: string } {
@@ -66,6 +81,7 @@ export function githubIssue(i: RenderInput): { title: string; body: string } {
     '|---|---|',
     ...metadataRows(i).map(([k, v]) => `| ${mdCell(k)} | ${mdCell(v)} |`),
     '',
+    ...(i.beforeReport ? ['**Before the report**', '', codeBlock(beforeReportLines(i.beforeReport)), ''] : []),
     `[Open ${i.key} in Snitch](${i.dashboardUrl})`,
     '',
     GITHUB_MARKER(i.ticket.id),
@@ -87,6 +103,7 @@ export function email(i: RenderInput, subjectPrefix: string, inlineScreenshotCid
     '',
     ...rows.map(([k, v]) => `${k}: ${v}`),
     '',
+    ...(i.beforeReport ? ['Before the report:', ...beforeReportLines(i.beforeReport).map((l) => `  ${l}`), ''] : []),
     ...(i.links.video ? [`Screen recording: ${i.links.video}`, ''] : i.videoSeconds ? [`Screen recording (${i.videoSeconds} s) attached in Snitch`, ''] : []),
     `Open in Snitch: ${i.dashboardUrl}`,
   ].join('\n');
@@ -100,6 +117,8 @@ ${i.links.video ? `<tr><td style="padding-bottom:16px;font-size:14px"><a href="$
 <tr><td><table role="presentation" cellpadding="0" cellspacing="0" style="font-size:13px;width:100%">
 ${rows.map(([k, v]) => `<tr><td style="color:#6e6e73;padding:3px 12px 3px 0;white-space:nowrap;vertical-align:top">${escapeHtml(k)}</td><td style="padding:3px 0">${escapeHtml(v)}</td></tr>`).join('\n')}
 </table></td></tr>
+${i.beforeReport ? `<tr><td style="padding-top:16px;font-size:13px;font-weight:600">Before the report</td></tr>
+<tr><td><pre style="margin:6px 0 0;padding:10px 12px;background:#f5f5f7;border-radius:8px;font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-word">${escapeHtml(beforeReportLines(i.beforeReport).join('\n'))}</pre></td></tr>` : ''}
 <tr><td style="padding-top:20px"><a href="${escapeHtml(i.dashboardUrl)}" style="display:inline-block;background:#1d1d1f;color:#fff;text-decoration:none;padding:10px 16px;border-radius:8px;font-size:14px">Open in Snitch</a></td></tr>
 </table></body></html>`;
   return { subject, text, html };

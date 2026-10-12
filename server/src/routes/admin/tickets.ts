@@ -1,6 +1,8 @@
 /**
- * Ticket triage for the dashboard: list, detail, status/assignee/type changes,
- * comments, escalation, deletion, attachment content and share links.
+ * Ticket triage for the dashboard: list, detail (with similar tickets),
+ * status/assignee/type changes, comments, escalation, deletion, attachment
+ * content and share links. A change queues what it implies: notification
+ * emails and GitHub issue sync.
  */
 import { Hono } from 'hono';
 import {
@@ -9,6 +11,7 @@ import {
   ShareLinkCreate,
   TicketListQuery,
   TicketPatch,
+  type SimilarTicketView,
   type TicketDetail,
 } from '@snitch/contract';
 import type { Deps } from '../../deps';
@@ -17,13 +20,43 @@ import { HttpError, invalid, notFound } from '../../http/errors';
 import { requireAdmin } from '../../http/session';
 import { jsonBody, query } from '../../http/validate';
 import { serveBlob } from '../../http/range';
-import type { TicketRow } from '../../repo/tickets';
-import { escalate } from '../../worker/worker';
+import { isOpenStatus, ticketKey, type TicketRow } from '../../repo/tickets';
+import { DAY_MS } from '../../util/clock';
+import { rankSimilar, type SimilarityInput } from '../../util/similarity';
+import {
+  deleteTicket,
+  escalate,
+  queueAssignedNotification,
+  queueGithubCommentSync,
+  queueGithubStatusSync,
+  queueResolvedNotification,
+} from '../../worker/worker';
+
+/** How far back, and how many open tickets, "similar tickets" looks at. */
+const SIMILAR_WINDOW_MS = 60 * DAY_MS;
+const SIMILAR_SCAN = 300;
 
 function getTicket(deps: Deps, id: string): TicketRow {
   const t = deps.tickets.get(id);
   if (!t) throw notFound('No such ticket');
   return t;
+}
+
+function similarityInput(t: TicketRow): SimilarityInput {
+  return { title: t.title, description: t.description, screen: t.screen, platform: t.platform, appVersion: t.app_version, appBuild: t.app_build, type: t.type };
+}
+
+export function similarTickets(deps: Deps, t: TicketRow, prefix: string): SimilarTicketView[] {
+  const candidates = deps.tickets.similarCandidates(t, SIMILAR_WINDOW_MS, SIMILAR_SCAN).map((row) => ({ ...similarityInput(row), row }));
+  return rankSimilar(similarityInput(t), candidates).map(({ item: { row }, score, reasons }) => ({
+    id: row.id,
+    key: ticketKey(prefix, row.number),
+    title: row.title,
+    status: row.status,
+    createdAt: row.created_at,
+    score,
+    reasons,
+  }));
 }
 
 export function detail(deps: Deps, t: TicketRow): TicketDetail {
@@ -54,6 +87,7 @@ export function detail(deps: Deps, t: TicketRow): TicketDetail {
       .matchingRules(t.project_id, t.type)
       .map((r) => r.integrationId)
       .filter((id) => !done.has(id)),
+    similar: similarTickets(deps, t, project.ticketPrefix),
   };
 }
 
@@ -68,33 +102,46 @@ export function ticketRoutes(deps: Deps): Hono<AppEnv> {
     const t = getTicket(deps, c.req.param('id'));
     const patch = await jsonBody(c, TicketPatch);
     const actor = { type: 'user' as const, userId: c.get('user').id };
-    if (patch.type !== undefined) {
-      const project = deps.projects.get(t.project_id)!;
-      if (!project.reportTypes.some((r) => r.id === patch.type) && patch.type !== t.type) throw invalid(`Unknown report type ${patch.type}`);
-      deps.tickets.setType(t.id, patch.type, actor);
+    // Validate everything before changing anything, so a bad field doesn't leave half a patch applied.
+    if (patch.type !== undefined && patch.type !== t.type && !deps.projects.get(t.project_id)!.reportTypes.some((r) => r.id === patch.type)) {
+      throw invalid(`Unknown report type ${patch.type}`);
     }
+    if (patch.assigneeUserId !== undefined && patch.assigneeUserId !== null && !deps.users.get(patch.assigneeUserId)) throw invalid('Unknown user');
+    if (patch.duplicateOfId !== undefined && patch.duplicateOfId !== null) {
+      const original = deps.tickets.get(patch.duplicateOfId);
+      if (!original || original.project_id !== t.project_id || original.id === t.id) throw invalid('Duplicate must point at another ticket in the same project');
+    }
+
+    if (patch.type !== undefined) deps.tickets.setType(t.id, patch.type, actor);
     if (patch.title !== undefined) deps.tickets.setTitle(t.id, patch.title.trim(), actor);
-    if (patch.assigneeUserId !== undefined) {
-      if (patch.assigneeUserId !== null && !deps.users.get(patch.assigneeUserId)) throw invalid('Unknown user');
-      deps.tickets.setAssignee(t.id, patch.assigneeUserId, actor);
-    }
+    const assigned = patch.assigneeUserId !== undefined ? deps.tickets.setAssignee(t.id, patch.assigneeUserId, actor) : null;
+    // Before the status, so a "resolved, fixed in 1.4.2" patch emails the reporter with the build.
+    if (patch.fixedIn !== undefined) deps.tickets.setFixedIn(t.id, patch.fixedIn);
+    let statusEvent: number | null = null;
     if (patch.duplicateOfId !== undefined) {
-      if (patch.duplicateOfId !== null) {
-        const original = deps.tickets.get(patch.duplicateOfId);
-        if (!original || original.project_id !== t.project_id || original.id === t.id) throw invalid('Duplicate must point at another ticket in the same project');
-      }
-      deps.tickets.setDuplicateOf(t.id, patch.duplicateOfId);
-      if (patch.duplicateOfId !== null && patch.status === undefined) deps.tickets.setStatus(t.id, 'duplicate', actor);
+      deps.tickets.setDuplicateOf(t.id, patch.duplicateOfId, actor);
+      if (patch.duplicateOfId !== null && patch.status === undefined) statusEvent = deps.tickets.setStatus(t.id, 'duplicate', actor);
     }
-    if (patch.status !== undefined) deps.tickets.setStatus(t.id, patch.status, actor);
-    return c.json(detail(deps, getTicket(deps, t.id)));
+    if (patch.status !== undefined) statusEvent = deps.tickets.setStatus(t.id, patch.status, actor) ?? statusEvent;
+
+    const fresh = getTicket(deps, t.id);
+    let queued = false;
+    if (assigned !== null) queued = queueAssignedNotification(deps, fresh, actor.userId, assigned) || queued;
+    if (statusEvent !== null) {
+      if (fresh.status === 'resolved' && t.status !== 'resolved') queued = queueResolvedNotification(deps, fresh, statusEvent) || queued;
+      // Closing (for any reason, which also sets the issue's close reason) or reopening a closed ticket; open → open is no news to GitHub.
+      if (!isOpenStatus(fresh.status) || !isOpenStatus(t.status)) queued = queueGithubStatusSync(deps, t.id, statusEvent) > 0 || queued;
+    }
+    if (queued) deps.wake();
+    return c.json(detail(deps, fresh));
   });
 
   app.post('/tickets/:id/comments', async (c) => {
     const t = getTicket(deps, c.req.param('id'));
     const { body } = await jsonBody(c, CommentCreate);
-    deps.tickets.addEvent(t.id, { type: 'user', userId: c.get('user').id }, 'comment', { body });
+    const eventId = deps.tickets.addEvent(t.id, { type: 'user', userId: c.get('user').id }, 'comment', { body });
     deps.tickets.touch(t.id);
+    if (queueGithubCommentSync(deps, t.id, eventId) > 0) deps.wake();
     return c.json(detail(deps, getTicket(deps, t.id)), 201);
   });
 
@@ -111,7 +158,7 @@ export function ticketRoutes(deps: Deps): Hono<AppEnv> {
 
   app.delete('/tickets/:id', requireAdmin(), async (c) => {
     const t = getTicket(deps, c.req.param('id'));
-    for (const key of deps.tickets.delete(t.id)) await deps.blobs.delete(key).catch(() => undefined);
+    await deleteTicket(deps, t.id);
     deps.audit.add(c.get('user').id, 'ticket.deleted', t.id, { number: t.number, project: t.project_id }, c.get('ip'));
     return c.json({ ok: true });
   });

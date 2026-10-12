@@ -10,6 +10,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { join, resolve } from 'node:path';
+import { CHUNK_BYTES_DEFAULT, CHUNK_BYTES_MAX, CHUNK_BYTES_MIN } from '@snitch/contract';
 
 export type TrustProxy = 'none' | 'xff' | 'fly' | 'cloudflare';
 
@@ -20,6 +21,30 @@ export interface S3Config {
   accessKeyId: string;
   secretAccessKey: string;
   forcePathStyle: boolean;
+}
+
+export interface BackupConfig {
+  /** Hours between scheduled backups; 0 turns them off. */
+  intervalHours: number;
+  /** Backups kept; older ones are deleted after each run. */
+  keep: number;
+  /** A separate bucket (SNITCH_BACKUP_S3_*); null backs up into the blob store under `backups/`. */
+  s3: S3Config | null;
+  /** Key prefix inside that bucket. */
+  s3Prefix: string;
+}
+
+/** Sign in with GitHub: an OAuth app's credentials plus who may use it. */
+export interface GithubAuthConfig {
+  clientId: string;
+  clientSecret: string;
+  /** Members of this organization only (membership must be active). */
+  allowedOrg: string | null;
+  /** Create a member for an unknown GitHub user (only together with allowedOrg). */
+  autoCreate: boolean;
+  /** github.com, or a GitHub Enterprise Server host. */
+  webUrl: string;
+  apiUrl: string;
 }
 
 export interface ServerConfig {
@@ -43,6 +68,10 @@ export interface ServerConfig {
   allowPrivateWebhooks: boolean;
   sessionDays: number;
   cookieSecure: boolean;
+  /** Preferred chunk size for resumable attachment uploads. */
+  uploadChunkBytes: number;
+  backup: BackupConfig;
+  githubAuth: GithubAuthConfig | null;
   /** Report intake limits. */
   limits: {
     reportsPerKeyPerHour: number;
@@ -71,6 +100,57 @@ function bool(name: string, fallback: boolean): boolean {
   if (['1', 'true', 'yes', 'on'].includes(raw)) return true;
   if (['0', 'false', 'no', 'off'].includes(raw)) return false;
   throw new Error(`${name} must be true or false, got "${raw}"`);
+}
+
+function loadS3(prefix: string, required: boolean): S3Config | null {
+  const endpoint = str(`${prefix}_ENDPOINT`);
+  const bucket = str(`${prefix}_BUCKET`);
+  if (!required && !endpoint && !bucket) return null;
+  const need = (n: string) => {
+    const v = str(n);
+    if (!v) throw new Error(`${n} is required${required ? ' when SNITCH_STORAGE=s3' : ` when ${prefix}_ENDPOINT or _BUCKET is set`}`);
+    return v;
+  };
+  return {
+    endpoint: need(`${prefix}_ENDPOINT`).replace(/\/+$/, ''),
+    region: str(`${prefix}_REGION`) ?? 'auto',
+    bucket: need(`${prefix}_BUCKET`),
+    accessKeyId: need(`${prefix}_ACCESS_KEY_ID`),
+    secretAccessKey: need(`${prefix}_SECRET_ACCESS_KEY`),
+    forcePathStyle: bool(`${prefix}_FORCE_PATH_STYLE`, true),
+  };
+}
+
+/** `a/b` → `a/b/`; empty (or `/`) → the bucket root. */
+function keyPrefix(raw: string): string {
+  const p = raw.replace(/^\/+|\/+$/g, '');
+  return p ? `${p}/` : '';
+}
+
+function loadGithubAuth(): GithubAuthConfig | null {
+  const clientId = str('SNITCH_GITHUB_CLIENT_ID');
+  const clientSecret = str('SNITCH_GITHUB_CLIENT_SECRET');
+  if (!clientId && !clientSecret) return null;
+  if (!clientId || !clientSecret) throw new Error('Set both SNITCH_GITHUB_CLIENT_ID and SNITCH_GITHUB_CLIENT_SECRET, or neither');
+  const url = (name: string, fallback: string) => {
+    const v = (str(name) ?? fallback).replace(/\/+$/, '');
+    try {
+      new URL(v);
+    } catch {
+      throw new Error(`${name} is not a valid URL: "${v}"`);
+    }
+    return v;
+  };
+  const allowedOrg = str('SNITCH_GITHUB_ALLOWED_ORG') ?? null;
+  if (allowedOrg !== null && !/^[A-Za-z0-9-]{1,39}$/.test(allowedOrg)) throw new Error('SNITCH_GITHUB_ALLOWED_ORG must be a GitHub organization login');
+  return {
+    clientId,
+    clientSecret,
+    allowedOrg,
+    autoCreate: bool('SNITCH_GITHUB_AUTO_CREATE', false),
+    webUrl: url('SNITCH_GITHUB_WEB_URL', 'https://github.com'),
+    apiUrl: url('SNITCH_GITHUB_API_URL', 'https://api.github.com'),
+  };
 }
 
 function loadSecretKey(dataDir: string): string {
@@ -111,22 +191,7 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
 
   const storage = (str('SNITCH_STORAGE') ?? 'fs') as 'fs' | 's3';
   if (storage !== 'fs' && storage !== 's3') throw new Error('SNITCH_STORAGE must be fs or s3');
-  let s3: S3Config | null = null;
-  if (storage === 's3') {
-    const need = (n: string) => {
-      const v = str(n);
-      if (!v) throw new Error(`${n} is required when SNITCH_STORAGE=s3`);
-      return v;
-    };
-    s3 = {
-      endpoint: need('SNITCH_S3_ENDPOINT').replace(/\/+$/, ''),
-      region: str('SNITCH_S3_REGION') ?? 'auto',
-      bucket: need('SNITCH_S3_BUCKET'),
-      accessKeyId: need('SNITCH_S3_ACCESS_KEY_ID'),
-      secretAccessKey: need('SNITCH_S3_SECRET_ACCESS_KEY'),
-      forcePathStyle: bool('SNITCH_S3_FORCE_PATH_STYLE', true),
-    };
-  }
+  const s3 = storage === 's3' ? loadS3('SNITCH_S3', true) : null;
 
   const trustProxy = (str('SNITCH_TRUST_PROXY') ?? 'none') as TrustProxy;
   if (!['none', 'xff', 'fly', 'cloudflare'].includes(trustProxy)) {
@@ -152,6 +217,14 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     allowPrivateWebhooks: bool('SNITCH_ALLOW_PRIVATE_WEBHOOKS', false),
     sessionDays: num('SNITCH_SESSION_DAYS', 14, 1, 365),
     cookieSecure: bool('SNITCH_COOKIE_SECURE', publicUrl.startsWith('https://')),
+    uploadChunkBytes: Math.floor(num('SNITCH_UPLOAD_CHUNK_BYTES', CHUNK_BYTES_DEFAULT, CHUNK_BYTES_MIN, CHUNK_BYTES_MAX)),
+    backup: {
+      intervalHours: num('SNITCH_BACKUP_INTERVAL_HOURS', 0, 0, 24 * 365),
+      keep: Math.floor(num('SNITCH_BACKUP_KEEP', 7, 1, 1000)),
+      s3: loadS3('SNITCH_BACKUP_S3', false),
+      s3Prefix: keyPrefix(str('SNITCH_BACKUP_S3_PREFIX') ?? 'snitch-backups/'),
+    },
+    githubAuth: loadGithubAuth(),
     limits: {
       reportsPerKeyPerHour: num('SNITCH_REPORTS_PER_KEY_PER_HOUR', 120, 1),
       reportsPerIpPer10Min: num('SNITCH_REPORTS_PER_IP_PER_10_MIN', 20, 1),

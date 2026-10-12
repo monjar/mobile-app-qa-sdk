@@ -10,6 +10,7 @@ import type { TicketRow } from '../repo/tickets';
 import { buildTicketContext } from './context';
 import { SendError } from './errors';
 import { email, escapeHtml } from './render';
+import { loadBeforeReport } from './timeline';
 import type { SendResult } from './github';
 
 const INLINE_LIMIT = 8 * 1024 * 1024;
@@ -31,6 +32,7 @@ export async function sendEmail(deps: Deps, integration: IntegrationRow, ticket:
       inline = null;
     }
   }
+  ctx.render.beforeReport = await loadBeforeReport(deps, ticket, ctx.attachments);
   const msg = email(ctx.render, cfg.subjectPrefix, inline?.cid ?? null);
   try {
     const r = await deps.mailer.send({ to: cfg.to, ...msg, attachments: inline ? [inline] : [] });

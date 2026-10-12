@@ -17,6 +17,12 @@ services:
       SNITCH_MAIL_FROM: ${SNITCH_MAIL_FROM:-Snitch <snitch@localhost>}
       # Behind Caddy below, trust its X-Forwarded-For for rate limiting.
       SNITCH_TRUST_PROXY: ${SNITCH_TRUST_PROXY:-none}
+      # Optional: scheduled database backups (hours between them; 0 = off). Add the
+      # SNITCH_BACKUP_S3_* variables to send them to a bucket off this machine.
+      SNITCH_BACKUP_INTERVAL_HOURS: ${SNITCH_BACKUP_INTERVAL_HOURS:-0}
+      # Optional: Sign in with GitHub (an OAuth app; see docs/server.md).
+      SNITCH_GITHUB_CLIENT_ID: ${SNITCH_GITHUB_CLIENT_ID:-}
+      SNITCH_GITHUB_CLIENT_SECRET: ${SNITCH_GITHUB_CLIENT_SECRET:-}
     ports:
       - "${SNITCH_PORT:-8080}:8080"
     volumes:

@@ -156,3 +156,143 @@ export function adminFetch(h: Harness, s: Session, path: string, init: { method?
     body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
   });
 }
+
+/** PUTs one Content-Range chunk of `file` (bytes start..end inclusive). */
+export async function putChunk(
+  h: Harness,
+  reportId: string,
+  name: string,
+  file: Buffer,
+  contentType: string,
+  start: number,
+  end: number,
+  headers: Record<string, string> = {},
+) {
+  const chunk = file.subarray(start, end + 1);
+  return h.app.request(`/api/v1/reports/${reportId}/attachments/${name}`, {
+    method: 'PUT',
+    headers: {
+      'x-snitch-key': INGEST_KEY,
+      'content-type': contentType,
+      'content-length': String(chunk.length),
+      'content-range': `bytes ${start}-${end}/${file.length}`,
+      'x-content-sha256': sha256(file),
+      'x-chunk-sha256': sha256(chunk),
+      ...headers,
+    },
+    body: chunk,
+  });
+}
+
+export interface FakeIssue {
+  number: number;
+  title: string;
+  body: string;
+  state: 'open' | 'closed';
+  stateReason: string | null;
+  comments: { id: number; body: string }[];
+}
+
+export interface FakeGithubIdentity {
+  user: { id: number; login: string; name: string | null };
+  emails: { email: string; verified: boolean; primary: boolean }[];
+  /** org login → membership state. */
+  orgs: Record<string, 'active' | 'pending'>;
+}
+
+/**
+ * A small in-memory GitHub for escalation, issue sync and sign-in tests: the
+ * issues API (create, search by marker, update, comments) and the OAuth
+ * endpoints plus the user API that sign-in calls.
+ */
+export class FakeGithub {
+  readonly issues = new Map<number, FakeIssue>();
+  readonly calls: { method: string; path: string; body: unknown; auth: string | null }[] = [];
+  /** Statuses for the next issue writes (POST/PATCH), e.g. [502] for one transient failure. */
+  failWrites: number[] = [];
+  /** OAuth code → access token, and access token → who it belongs to. */
+  readonly codes = new Map<string, string>();
+  readonly tokens = new Map<string, FakeGithubIdentity>();
+  private nextIssue = 1;
+  private nextComment = 9001;
+
+  constructor(
+    readonly owner = 'monjar',
+    readonly repo = 'mochiro',
+    readonly web = 'https://github.com',
+    readonly api = 'https://api.github.com',
+  ) {}
+
+  /** Registers a GitHub user who will sign in with `code`. */
+  signsInWith(code: string, identity: FakeGithubIdentity): void {
+    const token = `gho_${code}`;
+    this.codes.set(code, token);
+    this.tokens.set(token, identity);
+  }
+
+  writes(): { method: string; path: string; body: unknown }[] {
+    return this.calls.filter((c) => c.method !== 'GET');
+  }
+
+  readonly handle: FetchHandler = (url, init) => {
+    const u = new URL(url);
+    const method = (init.method ?? 'GET').toUpperCase();
+    const headers = (init.headers ?? {}) as Record<string, string>;
+    const body = typeof init.body === 'string' ? (JSON.parse(init.body) as Record<string, unknown>) : null;
+    this.calls.push({ method, path: u.pathname, body, auth: headers.authorization ?? null });
+
+    if (url.startsWith(`${this.web}/login/oauth/access_token`)) {
+      const token = this.codes.get(String(body?.code));
+      return Response.json(token ? { access_token: token, token_type: 'bearer', scope: 'read:user,user:email' } : { error: 'bad_verification_code' });
+    }
+    if (!url.startsWith(this.api)) return new Response('unknown host', { status: 599 });
+    const path = u.pathname;
+    const who = this.tokens.get((headers.authorization ?? '').replace(/^Bearer /, ''));
+    if (path === '/user') return who ? Response.json(who.user) : new Response('Bad credentials', { status: 401 });
+    if (path === '/user/emails') return who ? Response.json(who.emails) : new Response('Bad credentials', { status: 401 });
+    const org = /^\/user\/memberships\/orgs\/([^/]+)$/.exec(path);
+    if (org) {
+      const state = who?.orgs[decodeURIComponent(org[1]!)];
+      return state ? Response.json({ state, role: 'member' }) : Response.json({ message: 'Not Found' }, { status: 404 });
+    }
+    if (path === '/search/issues') {
+      const marker = /"(snitch:ticket=[^"]+)"/.exec(u.searchParams.get('q') ?? '')?.[1];
+      const items = [...this.issues.values()].filter((i) => marker && i.body.includes(marker)).map((i) => this.issueJson(i));
+      return Response.json({ items });
+    }
+
+    const repoPath = `/repos/${this.owner}/${this.repo}`;
+    if (!path.startsWith(repoPath)) return Response.json({ message: 'Not Found' }, { status: 404 });
+    const rest = path.slice(repoPath.length);
+    if (method !== 'GET' && this.failWrites.length) return new Response('upstream sad', { status: this.failWrites.shift()! });
+    if (rest === '/issues' && method === 'POST') {
+      const issue: FakeIssue = { number: this.nextIssue++, title: String(body?.title), body: String(body?.body), state: 'open', stateReason: null, comments: [] };
+      this.issues.set(issue.number, issue);
+      return Response.json(this.issueJson(issue), { status: 201 });
+    }
+    const m = /^\/issues\/(\d+)(\/comments)?$/.exec(rest);
+    const issue = m ? this.issues.get(Number(m[1])) : undefined;
+    if (!m || !issue) return Response.json({ message: 'Not Found' }, { status: 404 });
+    if (!m[2] && method === 'PATCH') {
+      if (body?.state === 'closed') {
+        issue.state = 'closed';
+        issue.stateReason = String(body.state_reason ?? 'completed');
+      } else if (body?.state === 'open') {
+        issue.state = 'open';
+        issue.stateReason = 'reopened';
+      }
+      return Response.json(this.issueJson(issue));
+    }
+    if (m[2] && method === 'POST') {
+      const comment = { id: this.nextComment++, body: String(body?.body) };
+      issue.comments.push(comment);
+      return Response.json({ ...comment, html_url: `${this.issueJson(issue).html_url}#issuecomment-${comment.id}` }, { status: 201 });
+    }
+    if (m[2] && method === 'GET') return Response.json(issue.comments);
+    return Response.json({ message: 'Not Found' }, { status: 404 });
+  };
+
+  issueJson(i: FakeIssue) {
+    return { number: i.number, html_url: `https://github.com/${this.owner}/${this.repo}/issues/${i.number}`, state: i.state, state_reason: i.stateReason, body: i.body, title: i.title };
+  }
+}

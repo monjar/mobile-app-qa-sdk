@@ -210,4 +210,62 @@ export const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX audit_by_time ON audit_log(created_at DESC);
   `,
+
+  // 2 — 0.3: device check-ins, chunked uploads, notifications, GitHub sync and sign-in, scheduled backups
+  `
+  ALTER TABLE projects ADD COLUMN notify_assignees INTEGER NOT NULL DEFAULT 1;
+  ALTER TABLE projects ADD COLUMN notify_reporters INTEGER NOT NULL DEFAULT 0;
+
+  ALTER TABLE tickets ADD COLUMN install_id TEXT;
+  ALTER TABLE tickets ADD COLUMN screen TEXT;
+  ALTER TABLE tickets ADD COLUMN fixed_in TEXT;
+  CREATE INDEX tickets_by_install ON tickets(project_id, install_id) WHERE install_id IS NOT NULL;
+  CREATE INDEX tickets_by_build ON tickets(project_id, platform, app_version, app_build);
+
+  -- Verified bytes of a chunked upload in <dataDir>/tmp/partial/<id>.part.
+  ALTER TABLE attachments ADD COLUMN received_bytes INTEGER NOT NULL DEFAULT 0;
+
+  -- Id of the outside thing an event mirrors (a GitHub comment), so a redelivered webhook is a no-op.
+  ALTER TABLE ticket_events ADD COLUMN external_id TEXT;
+  CREATE UNIQUE INDEX ticket_events_external ON ticket_events(ticket_id, kind, external_id) WHERE external_id IS NOT NULL;
+
+  -- Signing secret GitHub uses for issue webhooks (sealed like secret_enc).
+  ALTER TABLE integrations ADD COLUMN webhook_secret_enc TEXT;
+
+  ALTER TABLE users ADD COLUMN github_id INTEGER;
+  ALTER TABLE users ADD COLUMN github_login TEXT;
+  CREATE UNIQUE INDEX users_by_github_id ON users(github_id) WHERE github_id IS NOT NULL;
+
+  -- One row per SDK install, from the config fetches it makes (installId is random per install).
+  CREATE TABLE installs (
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    install_id TEXT NOT NULL,
+    platform TEXT NOT NULL,
+    release_type TEXT NOT NULL,
+    app_id TEXT,
+    app_version TEXT,
+    build TEXT,
+    os TEXT,
+    model TEXT,
+    sdk_version TEXT,
+    wrapper TEXT,
+    signals TEXT,
+    active INTEGER NOT NULL DEFAULT 1,
+    health TEXT,
+    config_enabled INTEGER NOT NULL,
+    first_seen_at INTEGER NOT NULL,
+    last_seen_at INTEGER NOT NULL,
+    checkins INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (project_id, install_id)
+  );
+  CREATE INDEX installs_by_seen ON installs(project_id, last_seen_at DESC);
+  CREATE INDEX installs_by_last_seen ON installs(last_seen_at);
+
+  -- Small server-wide state (e.g. the last backup), one JSON value per key.
+  CREATE TABLE settings (
+    key TEXT PRIMARY KEY,
+    value_json TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  `,
 ];

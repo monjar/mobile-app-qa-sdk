@@ -34,6 +34,8 @@ export interface ProjectRow {
   allowed_app_ids_json: string | null;
   allowed_release_types_json: string;
   retention_days: number | null;
+  notify_assignees: number;
+  notify_reporters: number;
   created_at: number;
   updated_at: number;
   archived_at: number | null;
@@ -48,6 +50,8 @@ export interface Project {
   allowedAppIds: string[] | null;
   allowedReleaseTypes: ReleaseType[];
   retentionDays: number | null;
+  notifyAssignees: boolean;
+  notifyReporters: boolean;
   createdAt: number;
 }
 
@@ -61,6 +65,8 @@ function toProject(r: ProjectRow): Project {
     allowedAppIds: parseJson<string[] | null>(r.allowed_app_ids_json, null),
     allowedReleaseTypes: parseJson<ReleaseType[]>(r.allowed_release_types_json, [...DEFAULT_ENABLED_RELEASE_TYPES]),
     retentionDays: r.retention_days,
+    notifyAssignees: r.notify_assignees === 1,
+    notifyReporters: r.notify_reporters === 1,
     createdAt: r.created_at,
   };
 }
@@ -121,6 +127,8 @@ export class ProjectsRepo {
     if (patch.allowedAppIds !== undefined) (sets.push('allowed_app_ids_json = ?'), args.push(patch.allowedAppIds === null ? null : toJson(patch.allowedAppIds)));
     if (patch.allowedReleaseTypes !== undefined) (sets.push('allowed_release_types_json = ?'), args.push(toJson(patch.allowedReleaseTypes)));
     if (patch.retentionDays !== undefined) (sets.push('retention_days = ?'), args.push(patch.retentionDays));
+    if (patch.notifyAssignees !== undefined) (sets.push('notify_assignees = ?'), args.push(patch.notifyAssignees ? 1 : 0));
+    if (patch.notifyReporters !== undefined) (sets.push('notify_reporters = ?'), args.push(patch.notifyReporters ? 1 : 0));
     if (sets.length > 0) {
       sets.push('updated_at = ?');
       args.push(this.now(), id);
