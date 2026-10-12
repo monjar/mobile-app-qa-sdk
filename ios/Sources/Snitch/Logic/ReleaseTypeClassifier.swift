@@ -10,6 +10,8 @@ struct ProvisioningProfileSignals: Equatable {
     var getTaskAllow: Bool
     var provisionsAllDevices: Bool
     var provisionedDeviceCount: Int
+    /// False when a profile exists but its plist couldn't be read (all other fields false/0).
+    var readable = true
 }
 
 struct IosReleaseSignals: Equatable {

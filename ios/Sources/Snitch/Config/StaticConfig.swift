@@ -1,6 +1,7 @@
 // Build-time configuration (spec §2.1): the `Snitch` dictionary in Info.plist,
 // explicit `Snitch.start(serverURL:ingestKey:options:)` arguments, or the RN
-// bridge's options dictionary (same names in lowerCamelCase). Code wins over plist.
+// bridge's options dictionary (same names in lowerCamelCase: captureConsole,
+// captureNetwork, trackScreens, crashPrompt, checkInWhenInactive…). Code wins over plist.
 //
 // Validation is deliberately strict: a malformed URL or key means one warning and
 // an inert SDK, never a half-configured one sending to the wrong place.
@@ -82,6 +83,11 @@ struct StaticConfig {
         if let n = value("EdgeHandlePosition") as? NSNumber {
             options.edgeHandlePosition = EdgeHandleGeometry.clampPosition(n.doubleValue)
         }
+        if let b = bool(value("CaptureConsole")) { options.captureConsole = b }
+        if let b = bool(value("CaptureNetwork")) { options.captureNetwork = b }
+        if let b = bool(value("TrackScreens")) { options.trackScreens = b }
+        if let b = bool(value("CrashPrompt")) { options.crashPrompt = b }
+        if let b = bool(value("CheckInWhenInactive")) { options.checkInWhenInactive = b }
         if let s = value("EdgeHandleColor") as? String {
             if EdgeHandleGeometry.isValidHexColor(s) {
                 options.edgeHandleColor = s

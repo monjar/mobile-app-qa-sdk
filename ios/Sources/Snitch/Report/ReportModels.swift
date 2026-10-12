@@ -18,6 +18,10 @@ struct ReportCreate: Codable, Equatable {
     var sdk: SdkInfo
     var custom: [String: String]?
     var stats: CaptureStatsBody?
+    /// The screen showing when the sheet opened (spec §11.3).
+    var screen: String?
+    /// The check-in installId (spec §11.1).
+    var installId: String?
     var attachments: [AttachmentDeclaration]
 }
 
@@ -103,6 +107,14 @@ struct ReportCreated: Codable, Equatable {
     struct Attachment: Codable, Equatable {
         var name: String
         var state: String
+        /// Bytes of a chunked upload already on the server (missing attachments only).
+        var receivedBytes: Int?
+    }
+
+    /// Present when the server takes chunked attachment uploads (spec §11.2).
+    struct Upload: Codable, Equatable {
+        var resumable: Bool
+        var chunkBytes: Int
     }
 
     var reportId: String
@@ -110,6 +122,14 @@ struct ReportCreated: Codable, Equatable {
     var number: Int?
     var state: String?
     var attachments: [Attachment]?
+    var upload: Upload?
+}
+
+/// 202 answer to a chunk that is not the last one.
+struct AttachmentPartial: Codable, Equatable {
+    var name: String?
+    var state: String?
+    var receivedBytes: Int
 }
 
 enum ReportJSON {

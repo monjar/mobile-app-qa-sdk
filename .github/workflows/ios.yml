@@ -104,12 +104,20 @@ jobs:
 
       - name: Wait for the autoreport on the server
         if: ${{ !cancelled() }}
+        # The example logs, names its screen and requests localhost:8080/health once Snitch is
+        # active (the SDK's own 127.0.0.1 host is never recorded); the clip and timeline go up in
+        # 64 KiB chunks (SNITCH_DEBUG_CHUNK_BYTES in the UI test, ci-start-server.sh).
         run: >-
           node scripts/ci-await-report.mjs
           --server http://127.0.0.1:8080
           --description autoreport
           --out "$RUNNER_TEMP/report"
           --timeout 300
+          --expect-timeline app,log,net,screen
+          --expect-log "Snitch active; checking the server"
+          --expect-net "localhost:8080/health"
+          --expect-screen Example
+          --expect-checkin ios
 
       - name: Verify the uploaded video
         if: ${{ !cancelled() }}

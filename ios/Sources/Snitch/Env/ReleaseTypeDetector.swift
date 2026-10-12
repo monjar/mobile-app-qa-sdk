@@ -22,6 +22,10 @@
 // (AppTransactionRetry). The answer is deliberately not cached across launches:
 // the same build number can later be installed from the App Store, and a stale
 // "sandbox" must never switch Snitch on there.
+//
+// Each answer comes with the signals behind it and the AppTransaction state, for
+// the check-in's signals summary (spec §3.1), and says whether it is final: the
+// opt-in CheckInWhenInactive ping waits for a final `unknown`.
 
 import Foundation
 import StoreKit
@@ -30,7 +34,9 @@ enum ProvisioningProfileParser {
     /// Parses the plist embedded in a provisioning profile. A profile that exists but can't
     /// be parsed yields all-false signals, which classify as `unknown` (fail closed).
     static func parse(_ data: Data) -> ProvisioningProfileSignals {
-        let unreadable = ProvisioningProfileSignals(getTaskAllow: false, provisionsAllDevices: false, provisionedDeviceCount: 0)
+        let unreadable = ProvisioningProfileSignals(
+            getTaskAllow: false, provisionsAllDevices: false, provisionedDeviceCount: 0, readable: false
+        )
         guard let start = data.range(of: Data("<?xml".utf8)),
               let end = data.range(of: Data("</plist>".utf8), options: [], in: start.lowerBound..<data.endIndex)
         else { return unreadable }
@@ -43,6 +49,20 @@ enum ProvisioningProfileParser {
             provisionsAllDevices: (plist["ProvisionsAllDevices"] as? Bool) ?? false,
             provisionedDeviceCount: (plist["ProvisionedDevices"] as? [Any])?.count ?? 0
         )
+    }
+}
+
+/// One answer of the detector.
+struct ReleaseDetection: Equatable {
+    var type: SnitchReleaseType
+    var signals: IosReleaseSignals
+    var appTransaction: AppTransactionState
+    /// No later answer will follow.
+    var isFinal: Bool
+
+    /// The check-in's `signals` value (spec §3.1).
+    var summary: String {
+        ReleaseSignalsSummary.ios(signals, appTransaction: appTransaction)
     }
 }
 
@@ -80,31 +100,38 @@ enum ReleaseTypeDetector {
         return name == "sandboxReceipt" || name == "receipt" ? name : nil
     }
 
-    /// Detects the release type. `completion` is called on the main thread once with the
-    /// synchronous answer, and possibly a second time when AppTransaction refines `unknown`
+    /// Detects the release type. `completion` is called on the main thread with the
+    /// synchronous answer and, when that has to wait for AppTransaction (non-final
+    /// `unknown`), once more when AppTransaction answers or every attempt failed
     /// (however long that takes; see AppTransactionRetry).
-    static func detect(bundle: Bundle = .main, completion: @escaping (SnitchReleaseType) -> Void) {
+    static func detect(bundle: Bundle = .main, completion: @escaping (ReleaseDetection) -> Void) {
         let signals = collectSignals(bundle: bundle)
         let first = ReleaseTypeClassifier.classifyIos(signals)
-        completion(first)
-        guard ReleaseTypeClassifier.awaitsAppTransaction(signals) else { return }
-        if #available(iOS 16.0, *) {
-            let started = Date()
-            AppTransactionRetry.run(
-                read: { done in readAppTransactionEnvironment(completion: done) },
-                schedule: { delay, work in DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work) }
-            ) { env in
-                guard let env = env else {
-                    SDKLog.warn("Snitch is inactive: no provisioning profile or receipt, and StoreKit's AppTransaction could not be read after \(AppTransactionRetry.defaultDelays.count) attempts")
-                    return
-                }
-                var refined = signals
-                refined.appTransactionEnvironment = env
-                let type = ReleaseTypeClassifier.classifyIos(refined)
-                let seconds = String(format: "%.1f", Date().timeIntervalSince(started))
-                SDKLog.info("Release type \(type.rawValue) from AppTransaction (\(env)) after \(seconds) s")
-                if type != first { completion(type) }
+        guard ReleaseTypeClassifier.awaitsAppTransaction(signals) else {
+            completion(ReleaseDetection(type: first, signals: signals, appTransaction: .notNeeded, isFinal: true))
+            return
+        }
+        guard #available(iOS 16.0, *) else {
+            completion(ReleaseDetection(type: first, signals: signals, appTransaction: .notNeeded, isFinal: true))
+            return
+        }
+        completion(ReleaseDetection(type: first, signals: signals, appTransaction: .pending, isFinal: false))
+        let started = Date()
+        AppTransactionRetry.run(
+            read: { done in readAppTransactionEnvironment(completion: done) },
+            schedule: { delay, work in DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work) }
+        ) { env in
+            guard let env = env else {
+                SDKLog.warn("Snitch is inactive: no provisioning profile or receipt, and StoreKit's AppTransaction could not be read after \(AppTransactionRetry.defaultDelays.count) attempts")
+                completion(ReleaseDetection(type: first, signals: signals, appTransaction: .failed, isFinal: true))
+                return
             }
+            var refined = signals
+            refined.appTransactionEnvironment = env
+            let type = ReleaseTypeClassifier.classifyIos(refined)
+            let seconds = String(format: "%.1f", Date().timeIntervalSince(started))
+            SDKLog.info("Release type \(type.rawValue) from AppTransaction (\(env)) after \(seconds) s")
+            completion(ReleaseDetection(type: type, signals: refined, appTransaction: AppTransactionState(environment: env), isFinal: true))
         }
     }
 

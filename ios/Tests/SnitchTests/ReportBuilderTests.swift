@@ -1,6 +1,7 @@
 // ReportCreate JSON: the Codable models round-trip the contract fixture, the
 // builder emits exactly the fixture's key set (no extra keys — the server's
-// CaptureStats is strict), and a report written to the outbox is consistent.
+// CaptureStats is strict), and a report written to the outbox is consistent,
+// including the 0.3 `timeline` and `crash` attachments.
 
 import CoreGraphics
 import XCTest
@@ -46,6 +47,14 @@ final class ReportBuilderTests: XCTestCase {
 
         XCTAssertNil(json["reporter"], "an invalid email must be dropped, not sent (422 would delete the report)")
         XCTAssertNil(json["custom"])
+        XCTAssertEqual(json["installId"] as? String, "3d8e6c1a-2b4f-4e5d-8a9b-0c1d2e3f4a5b")
+        XCTAssertEqual(json["screen"] as? String, "index")
+
+        context.installId = "NOT-A-UUID"
+        context.screen = "   "
+        let cleaned = ReportBuilder.makeReport(context: context, attachments: [], stats: nil)
+        XCTAssertNil(cleaned.installId, "an invalid installId is left out rather than failing validation")
+        XCTAssertNil(cleaned.screen)
         XCTAssertNil(json["stats"])
         XCTAssertEqual(json["type"] as? String, "other")
         XCTAssertEqual((json["attachments"] as? [Any])?.count, 0)
@@ -111,6 +120,60 @@ final class ReportBuilderTests: XCTestCase {
         XCTAssertNil(LogRing.attachmentText(ringLines: [], providerText: "  \n"))
     }
 
+    func testTimelineAndCrashAttachments() throws {
+        let outbox = Outbox(root: tempDir.appendingPathComponent("outbox"))
+        var context = fixtureLikeContext()
+        context.timeline = TimelineSnapshot(
+            events: [
+                .log(t: 1_791_381_003_500, level: .info, source: .app, message: "hello", tag: nil),
+                .app(t: 1_791_381_002_120, event: .launch),
+                .screen(t: 1_791_381_003_010, name: "index", source: .app),
+            ],
+            dropped: 2,
+            end: 1_791_381_302_120,
+            monoToWallMs: 0,
+            nativeConsole: nil,
+            screen: "index"
+        )
+        context.crashText = String(repeating: "x", count: ReportBuilder.crashTextMaxBytes + 10)
+        let dir = try ReportBuilder.write(context: context, screenshot: nil, video: nil, to: outbox)
+        let report = try XCTUnwrap(outbox.loadReport(in: dir))
+        XCTAssertEqual(report.attachments.map { $0.name }, ["timeline", "crash"])
+        XCTAssertEqual(report.screen, "index")
+        XCTAssertEqual(report.installId, "3d8e6c1a-2b4f-4e5d-8a9b-0c1d2e3f4a5b")
+
+        let timeline = report.attachments[0]
+        let data = try Data(contentsOf: dir.appendingPathComponent("timeline.ndjson"))
+        XCTAssertEqual(timeline.contentType, "application/x-ndjson")
+        XCTAssertEqual(timeline.sizeBytes, data.count)
+        XCTAssertEqual(timeline.sha256, Hashing.sha256Hex(data))
+        let lines = String(decoding: data, as: UTF8.self).split(separator: "\n").map(String.init)
+        XCTAssertEqual(lines.count, 4)
+        XCTAssertEqual(lines[0], #"{"k":"meta","v":1,"platform":"ios","start":1791381002120,"end":1791381302120,"dropped":2}"#)
+        XCTAssertEqual(lines[1], #"{"k":"app","t":1791381002120,"event":"launch"}"#, "events in time order")
+        XCTAssertEqual(lines[3], #"{"k":"log","t":1791381003500,"level":"info","src":"app","msg":"hello"}"#)
+
+        let crash = report.attachments[1]
+        XCTAssertEqual(crash.contentType, "text/plain")
+        XCTAssertEqual(crash.sizeBytes, ReportBuilder.crashTextMaxBytes, "the diagnostic is cut to 512 KB")
+        XCTAssertEqual(try Data(contentsOf: dir.appendingPathComponent("crash.txt")).count, ReportBuilder.crashTextMaxBytes)
+    }
+
+    func testEmptyTimelineIsNotAttached() throws {
+        let outbox = Outbox(root: tempDir.appendingPathComponent("outbox"))
+        var context = fixtureLikeContext()
+        context.timeline = TimelineSnapshot(events: [], dropped: 0, end: 1_791_381_302_120, monoToWallMs: 0, nativeConsole: nil, screen: nil)
+        let dir = try ReportBuilder.write(context: context, screenshot: nil, video: nil, to: outbox)
+        XCTAssertEqual(try XCTUnwrap(outbox.loadReport(in: dir)).attachments.count, 0)
+    }
+
+    func testTimelineVideoSpanIsTheClipInWallClock() {
+        // The clip ends at monotonic 10 s; wall = mono + offset; it lasted 5 s.
+        let span = ReportBuilder.timelineVideoSpan(endT: 10_000, durationMs: 5_000, monoToWallMs: 1_791_381_290_000)
+        XCTAssertEqual(span.end, 1_791_381_300_000)
+        XCTAssertEqual(span.start, 1_791_381_295_000)
+    }
+
     // MARK: - Fixture-shaped inputs
 
     private func fixtureLikeContext() -> ReportContext {
@@ -144,7 +207,9 @@ final class ReportBuilderTests: XCTestCase {
             custom: ["userTier": "beta"],
             wrapper: UserContext.Wrapper(name: "react-native", version: "0.1.0"),
             stats: nil,
-            logText: nil
+            logText: nil,
+            installId: "3d8e6c1a-2b4f-4e5d-8a9b-0c1d2e3f4a5b",
+            screen: "index"
         )
     }
 
@@ -162,6 +227,8 @@ final class ReportBuilderTests: XCTestCase {
                                   sha256: String(repeating: "a", count: 64), width: 1179, height: 2556, durationMs: nil),
             AttachmentDeclaration(name: "video", contentType: "video/mp4", sizeBytes: 1_288_211,
                                   sha256: String(repeating: "b", count: 64), width: 393, height: 852, durationMs: 15_000),
+            AttachmentDeclaration(name: "timeline", contentType: "application/x-ndjson", sizeBytes: 18_211,
+                                  sha256: String(repeating: "c", count: 64), width: nil, height: nil, durationMs: nil),
         ]
     }
 

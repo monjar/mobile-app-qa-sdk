@@ -10,7 +10,6 @@ enum Strings {
     static let descriptionLabel = "Description"
     static let reportTypeLabel = "Report type"
     static let screenshot = "Screenshot"
-    static let screenshotPreview = "Screenshot preview"
     static let video = "Video"
     static let videoLast = "last"
     static let secondsUnit = "s"
@@ -37,6 +36,22 @@ enum Strings {
     static let saveFailed = "Couldn't save the report"
 
     static let screenshotPrompt = "Report this screen?"
+    static let crashPrompt = "The app closed unexpectedly. Report it?"
+    static let crashAttached = "Details of the unexpected exit are attached."
+    static let dismiss = "Dismiss"
+
+    static let editScreenshot = "Edit screenshot"
+    static let editScreenshotHint = "Opens the screenshot to draw arrows and boxes or blur parts of it"
+    static let markupTools = "Markup tool"
+    static let markupArrow = "Arrow"
+    static let markupBox = "Box"
+    static let markupBlur = "Blur"
+    static let markupCanvas = "Screenshot"
+    static let markupCanvasHint = "Drag to draw with the selected tool"
+    static let undo = "Undo"
+    static let clearMarks = "Clear"
+    static let cancel = "Cancel"
+    static let done = "Done"
 
     static func testerNotice(gesture: Gesture, seconds: Int) -> String {
         let how: String

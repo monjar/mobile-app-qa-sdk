@@ -1,4 +1,4 @@
-// Debug hooks for UI tests and CI (spec §9). Read from the process environment
+// Debug hooks for UI tests and CI (spec §9, §11.10). Read from the process environment
 // (XCUIApplication.launchEnvironment, or SIMCTL_CHILD_* when launched by simctl)
 // and honoured only when the release type is `debug`, so a shipped build can't
 // be redirected or driven through its environment.
@@ -13,8 +13,13 @@ struct DebugHooks: Equatable {
     /// Run the real fire path this many ms into every touch sequence, then dismiss.
     var cancelAfterMs: Double?
     var showOnLaunch: Bool
+    /// SNITCH_DEBUG_CHUNK_BYTES: caps the upload chunk size (still at least CHUNK_BYTES_MIN),
+    /// so CI exercises chunked upload with small files.
+    var chunkBytes: Int?
 
-    static let inactive = DebugHooks(serverURL: nil, ingestKey: nil, autoReportAfter: nil, cancelAfterMs: nil, showOnLaunch: false)
+    static let inactive = DebugHooks(
+        serverURL: nil, ingestKey: nil, autoReportAfter: nil, cancelAfterMs: nil, showOnLaunch: false, chunkBytes: nil
+    )
 
     static func read(releaseType: SnitchReleaseType, environment: [String: String] = ProcessInfo.processInfo.environment) -> DebugHooks {
         guard releaseType == .debug else { return .inactive }
@@ -32,6 +37,9 @@ struct DebugHooks: Equatable {
             hooks.cancelAfterMs = ms
         }
         hooks.showOnLaunch = value("SNITCH_DEBUG_SHOW_ON_LAUNCH") == "1"
+        if let n = value("SNITCH_DEBUG_CHUNK_BYTES").flatMap({ Int($0) }), n > 0 {
+            hooks.chunkBytes = n
+        }
         if hooks != DebugHooks.inactive {
             SDKLog.info("Debug hooks active: \(hooks.summary)")
         }
@@ -45,6 +53,7 @@ struct DebugHooks: Equatable {
         if let s = autoReportAfter { parts.append("autoreport=\(s)s") }
         if let ms = cancelAfterMs { parts.append("cancelAfter=\(ms)ms") }
         if showOnLaunch { parts.append("showOnLaunch") }
+        if let n = chunkBytes { parts.append("chunkBytes=\(n)") }
         return parts.joined(separator: ", ")
     }
 }

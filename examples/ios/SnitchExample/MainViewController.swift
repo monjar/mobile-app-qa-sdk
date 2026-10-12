@@ -4,6 +4,7 @@
 // - a text field (masked in screenshots and video)
 // - an MTKView clearing to magenta (shows whether Metal content is captured)
 // - a Report button calling Snitch.show()
+// - Snitch.setScreen("Example"): the report's screen and the timeline's screen event
 
 import MetalKit
 import Snitch
@@ -20,6 +21,8 @@ final class MainViewController: UIViewController, UITableViewDataSource {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Snitch Example"
+        // May run before Snitch activates; the name is kept and recorded once it does.
+        Snitch.setScreen("Example")
         view.backgroundColor = .systemGroupedBackground
 
         counterLabel.text = "long presses: 0"

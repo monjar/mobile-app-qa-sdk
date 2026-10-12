@@ -25,6 +25,7 @@ enum DefaultsKey {
     static let crashLoopDowngrades = "snitch.crashLoopDowngrades"
     static let noticeShown = "snitch.noticeShown"
     static let reporterEmail = "snitch.reporterEmail"
+    static let installId = "snitch.installId"
 }
 
 /// A value guarded by a lock, readable from any thread.

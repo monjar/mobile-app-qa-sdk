@@ -1,6 +1,7 @@
 // State behind the report sheet. Plain ObservableObject mutated on the main
 // thread; the runtime builds it from the frozen capture at trigger time and gets
-// a Submission back on Send.
+// a Submission back on Send. The screenshot can be marked up (MarkupEditor) before
+// sending; the edited JPEG replaces the original here and goes out with the report.
 
 import SwiftUI
 import UIKit
@@ -10,6 +11,8 @@ final class ReportSheetModel: ObservableObject {
         var typeId: String
         var description: String
         var includeScreenshot: Bool
+        /// The screenshot as it should be sent (marked up or not); nil when not included.
+        var screenshot: Screenshot?
         var includeVideo: Bool
         var videoSeconds: Int
         var email: String?
@@ -20,8 +23,10 @@ final class ReportSheetModel: ObservableObject {
 
     let reportTypes: [ReportTypeOption]
     let message: String?
-    let thumbnail: UIImage?
-    private let screenshotJPEG: Data?
+    /// The screenshot taken at trigger time, or its marked-up replacement.
+    @Published private(set) var screenshot: Screenshot?
+    /// A crash follow-up: the diagnostic goes along, so Send needs nothing else.
+    let crashAttached: Bool
     /// Video is configured on (the row is hidden otherwise).
     let videoAvailable: Bool
     /// Whole seconds in the frozen ring (rounded up), 0 when nothing was recorded.
@@ -40,7 +45,8 @@ final class ReportSheetModel: ObservableObject {
     @Published var showMore = false
     @Published var confirmDiscard = false
     @Published var isShown = false
-    @Published var previewImage: UIImage? = nil
+    /// The open screenshot editor, if any.
+    @Published var markup: MarkupEditorModel?
 
     var onSend: ((Submission) -> Void)?
     var onDismiss: (() -> Void)?
@@ -56,13 +62,15 @@ final class ReportSheetModel: ObservableObject {
         videoMaxSeconds: Int,
         email: String?,
         pauseRecording: Bool,
+        screenshotSelected: Bool = true,
+        crashAttached: Bool = false,
         version: String = SnitchVersion.current
     ) {
         let types = reportTypes.isEmpty ? SdkConfig.default.reportTypes : reportTypes
         self.reportTypes = types
         self.message = message
-        thumbnail = screenshot?.thumbnail
-        screenshotJPEG = screenshot?.jpeg
+        self.screenshot = screenshot
+        self.crashAttached = crashAttached
         self.videoAvailable = videoAvailable
         self.recordedSeconds = max(0, recordedSeconds)
         maxSeconds = max(0, min(videoMaxSeconds, recordedSeconds))
@@ -72,7 +80,7 @@ final class ReportSheetModel: ObservableObject {
         } else {
             selectedType = types[0].id
         }
-        includeScreenshot = screenshot != nil
+        includeScreenshot = screenshot != nil && screenshotSelected
         includeVideo = videoAvailable && recordedSeconds > 0
         secondsText = String(min(ReportSheetModel.defaultSeconds, max(1, min(videoMaxSeconds, recordedSeconds))))
         self.email = email ?? ""
@@ -80,7 +88,11 @@ final class ReportSheetModel: ObservableObject {
     }
 
     var hasScreenshot: Bool {
-        thumbnail != nil
+        screenshot != nil
+    }
+
+    var thumbnail: UIImage? {
+        screenshot?.thumbnail
     }
 
     var hasRecording: Bool {
@@ -97,7 +109,7 @@ final class ReportSheetModel: ObservableObject {
         let hasText = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let hasShot = includeScreenshot && hasScreenshot
         let hasVideo = includeVideo && videoAvailable && hasRecording
-        return hasText || hasShot || hasVideo
+        return hasText || hasShot || hasVideo || crashAttached
     }
 
     /// Digits only, at most two of them, never above maxSeconds. Empty is allowed while typing.
@@ -119,13 +131,18 @@ final class ReportSheetModel: ObservableObject {
         secondsText = String((seconds + delta).clamped(1, max(1, maxSeconds)))
     }
 
-    func openPreview() {
-        guard let data = screenshotJPEG else { return }
-        previewImage = UIImage(data: data)
-    }
-
-    func closePreview() {
-        previewImage = nil
+    /// Opens the markup editor over the screenshot (tap on the thumbnail).
+    func openMarkup() {
+        guard markup == nil, let shot = screenshot, let editor = MarkupEditorModel(screenshot: shot) else { return }
+        editor.onFinish = { [weak self] edited in
+            guard let self = self else { return }
+            if let edited = edited {
+                self.screenshot = edited
+                self.includeScreenshot = true
+            }
+            self.markup = nil
+        }
+        markup = editor
     }
 
     func requestDismiss() {
@@ -147,10 +164,12 @@ final class ReportSheetModel: ObservableObject {
         guard !finished, canSend else { return }
         finished = true
         let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        let withScreenshot = includeScreenshot && hasScreenshot
         let submission = Submission(
             typeId: selectedType,
             description: String(text.prefix(10_000)),
-            includeScreenshot: includeScreenshot && hasScreenshot,
+            includeScreenshot: withScreenshot,
+            screenshot: withScreenshot ? screenshot : nil,
             includeVideo: includeVideo && videoAvailable && hasRecording,
             videoSeconds: seconds,
             email: trimmedEmail.isEmpty ? nil : trimmedEmail,

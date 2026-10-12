@@ -57,6 +57,8 @@ targets:
           Gesture: threeFingerHold
           CaptureMode: snapshot
           VideoMaxSeconds: 30
+          # HTTP requests in the report timeline (off by default).
+          CaptureNetwork: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.monjar.snitch.example

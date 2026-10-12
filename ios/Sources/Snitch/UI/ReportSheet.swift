@@ -1,7 +1,9 @@
 // The report sheet (spec §6): a bottom card on .ultraThinMaterial over a dimmed
 // backdrop. Type chips, a focused multiline description, screenshot and video
-// rows, a "More" disclosure and Send. System fonts and colors only, so light/dark
-// and Dynamic Type work out of the box. iOS 15 APIs only.
+// rows, a "More" disclosure and Send. Tapping the thumbnail opens the markup
+// editor over everything (spec §11.7); a crash follow-up shows that the diagnostic
+// is attached (spec §11.8). System fonts and colors only, so light/dark and
+// Dynamic Type work out of the box. iOS 15 APIs only.
 
 import SwiftUI
 
@@ -30,13 +32,13 @@ struct ReportSheet: View {
                     .transition(.move(edge: .bottom))
             }
 
-            if let image = model.previewImage {
-                preview(image)
+            if let editor = model.markup {
+                MarkupEditor(model: editor)
                     .transition(.opacity)
             }
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.9), value: model.isShown)
-        .animation(.easeInOut(duration: 0.2), value: model.previewImage != nil)
+        .animation(.easeInOut(duration: 0.2), value: model.markup != nil)
         .alert(Strings.discardTitle, isPresented: $model.confirmDiscard) {
             Button(Strings.discard, role: .destructive) { model.dismiss() }
             Button(Strings.keepEditing, role: .cancel) {}
@@ -65,6 +67,7 @@ struct ReportSheet: View {
             }
             typeChips
             descriptionEditor
+            if model.crashAttached { crashRow }
             if model.hasScreenshot { screenshotRow }
             if model.videoAvailable { videoRow }
             moreSection
@@ -169,7 +172,7 @@ struct ReportSheet: View {
             if let thumb = model.thumbnail {
                 Button {
                     focus = nil
-                    model.openPreview()
+                    model.openMarkup()
                 } label: {
                     Image(uiImage: thumb)
                         .resizable()
@@ -183,9 +186,23 @@ struct ReportSheet: View {
                         .opacity(model.includeScreenshot ? 1 : 0.4)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(Text(Strings.screenshotPreview))
+                .accessibilityLabel(Text(Strings.editScreenshot))
+                .accessibilityHint(Text(Strings.editScreenshotHint))
             }
         }
+    }
+
+    private var crashRow: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundColor(.orange)
+                .accessibilityHidden(true)
+            Text(Strings.crashAttached)
+                .font(.footnote)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .combine)
     }
 
     private var videoRow: some View {
@@ -281,31 +298,6 @@ struct ReportSheet: View {
         .buttonStyle(.borderedProminent)
         .controlSize(.large)
         .disabled(!model.canSend)
-    }
-
-    // MARK: - Full-screen screenshot preview
-
-    private func preview(_ image: UIImage) -> some View {
-        ZStack(alignment: .topTrailing) {
-            Color.black.ignoresSafeArea()
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFit()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .accessibilityLabel(Text(Strings.screenshotPreview))
-            Button {
-                model.closePreview()
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.largeTitle)
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundColor(.white)
-                    .padding()
-            }
-            .accessibilityLabel(Text(Strings.close))
-        }
-        .contentShape(Rectangle())
-        .onTapGesture { model.closePreview() }
     }
 }
 

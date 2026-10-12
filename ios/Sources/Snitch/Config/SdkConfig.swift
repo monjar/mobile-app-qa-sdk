@@ -3,7 +3,11 @@
 //
 // Merge rule (spec §2.2): static options first, remote config on top — except
 // that remote can only *restrict* captureMode (off < snapshot < system), because
-// system mode needs app-side setup the build may not have.
+// system mode needs app-side setup the build may not have. The 0.3 timeline
+// switches and crashPrompt likewise only narrow what the app enabled at build time
+// (spec §11.3/§11.8). They are optional here, as is `features`: a cached config
+// from 0.2 or an old server simply lacks them (no switches = all on; no features =
+// nothing beyond the 0.1 protocol).
 
 import Foundation
 
@@ -29,6 +33,26 @@ struct SdkConfig: Codable, Equatable {
         var mainThreadBudgetPct: Double
     }
 
+    struct Timeline: Codable, Equatable {
+        var console: Bool
+        var network: Bool
+        var screens: Bool
+
+        init(console: Bool, network: Bool, screens: Bool) {
+            self.console = console
+            self.network = network
+            self.screens = screens
+        }
+
+        /// A switch the server leaves out stays on, so a partial object can't fail the whole config.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            console = try c.decodeIfPresent(Bool.self, forKey: .console) ?? true
+            network = try c.decodeIfPresent(Bool.self, forKey: .network) ?? true
+            screens = try c.decodeIfPresent(Bool.self, forKey: .screens) ?? true
+        }
+    }
+
     var enabled: Bool
     var ttlSeconds: Int
     var reportTypes: [ReportTypeOption]
@@ -37,6 +61,12 @@ struct SdkConfig: Codable, Equatable {
     var maskTextInputs: Bool
     var screenshotPrompt: Bool
     var message: String?
+    /// Absent from 0.2 servers and caches: everything the app enabled stays on.
+    var timeline: Timeline?
+    /// Absent from 0.2 servers and caches: on.
+    var crashPrompt: Bool?
+    /// SERVER_FEATURES this server supports; absent from old servers.
+    var features: [String]?
 
     /// DEFAULT_SDK_CONFIG from contract/src/ingest.ts.
     static let `default` = SdkConfig(
@@ -60,8 +90,19 @@ struct SdkConfig: Codable, Equatable {
         ),
         maskTextInputs: true,
         screenshotPrompt: true,
-        message: nil
+        message: nil,
+        timeline: Timeline(console: true, network: true, screens: true),
+        crashPrompt: true,
+        features: nil
     )
+}
+
+/// Names from SERVER_FEATURES (contract/src/enums.ts).
+enum ServerFeature {
+    static let resumableUpload = "resumable-upload"
+    static let timeline = "timeline"
+    static let triggerCrash = "trigger-crash"
+    static let checkIn = "checkin"
 }
 
 enum SnapshotRenderer: String {
@@ -92,6 +133,14 @@ struct EffectiveConfig: Equatable {
     var edgeHandlePosition: Double
     var edgeHandleColor: String?
     var ttlSeconds: Int
+    /// Timeline kinds (spec §11.3): static option AND remote switch.
+    var consoleCapture: Bool
+    var networkCapture: Bool
+    var trackScreens: Bool
+    /// Crash follow-up (spec §11.8): static option AND remote switch.
+    var crashPrompt: Bool
+    /// What the server supports beyond the 0.1 protocol; empty until a config was fetched.
+    var serverFeatures: Set<String>
 
     var videoEnabled: Bool {
         captureMode != .off
@@ -141,6 +190,7 @@ enum ConfigMerger {
         if rendererDowngrade >= 2 && mode == .snapshot { mode = .off }
 
         let types = r.reportTypes.isEmpty ? base.reportTypes : r.reportTypes
+        let switches = remote?.timeline
         return EffectiveConfig(
             enabled: r.enabled,
             reportTypes: types,
@@ -160,7 +210,12 @@ enum ConfigMerger {
             edgeHandleSide: options.edgeHandleSide,
             edgeHandlePosition: options.edgeHandlePosition,
             edgeHandleColor: options.edgeHandleColor,
-            ttlSeconds: r.ttlSeconds.clamped(60, 86_400)
+            ttlSeconds: r.ttlSeconds.clamped(60, 86_400),
+            consoleCapture: options.captureConsole && (switches?.console ?? true),
+            networkCapture: options.captureNetwork && (switches?.network ?? true),
+            trackScreens: options.trackScreens && (switches?.screens ?? true),
+            crashPrompt: options.crashPrompt && (remote?.crashPrompt ?? true),
+            serverFeatures: Set(remote?.features ?? [])
         )
     }
 }
