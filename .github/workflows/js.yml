@@ -16,8 +16,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
@@ -34,9 +34,46 @@ jobs:
           PW_CHANNEL: chrome
           CI: "1"
         run: npx playwright test
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: failure()
         with:
           name: playwright-report
           path: dashboard/playwright-report
           if-no-files-found: ignore
+
+  s3:
+    # The S3 blob store and off-site backups against a real S3 API (SeaweedFS,
+    # path-style). server/test/s3.test.ts skips itself without these variables.
+    name: s3 (SeaweedFS)
+    runs-on: ubuntu-latest
+    env:
+      SNITCH_TEST_S3_ENDPOINT: http://127.0.0.1:8333
+      SNITCH_TEST_S3_REGION: us-east-1
+      SNITCH_TEST_S3_BUCKET: snitch-ci
+      SNITCH_TEST_S3_ACCESS_KEY_ID: snitchtest
+      SNITCH_TEST_S3_SECRET_ACCESS_KEY: snitchtestsecret
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - name: Start SeaweedFS
+        run: |
+          printf '%s' '{"identities":[{"name":"snitch","credentials":[{"accessKey":"snitchtest","secretKey":"snitchtestsecret"}],"actions":["Admin","Read","Write","List","Tagging"]}]}' > "$RUNNER_TEMP/s3.json"
+          docker run -d --name seaweedfs -p 8333:8333 -v "$RUNNER_TEMP/s3.json:/etc/seaweedfs/s3.json:ro" \
+            chrislusf/seaweedfs:4.48 server -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json
+          # An unsigned request gets 403 once the S3 API is up.
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8333/ || true)
+            [ "$code" = "403" ] && break
+            sleep 1
+          done
+          echo "S3 API answered $code"
+      - run: npm ci
+      - name: S3 driver tests
+        working-directory: server
+        run: npx vitest run test/s3.test.ts
+      - name: SeaweedFS log
+        if: failure()
+        run: docker logs seaweedfs 2>&1 | tail -100

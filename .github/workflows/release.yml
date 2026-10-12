@@ -29,8 +29,8 @@ jobs:
       contents: write
       id-token: write   # npm provenance
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
@@ -58,13 +58,13 @@ jobs:
         if: github.ref_type != 'tag' && inputs.dry_run != false
         working-directory: react-native
         run: npm publish --access public --dry-run
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: react-native-snitch
           path: react-native/react-native-snitch-*.tgz
       - name: GitHub Release
         if: github.ref_type == 'tag'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: react-native/react-native-snitch-*.tgz
           generate_release_notes: true

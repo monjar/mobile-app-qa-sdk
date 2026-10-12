@@ -42,8 +42,8 @@ jobs:
       run:
         working-directory: react-native
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
@@ -60,7 +60,7 @@ jobs:
           mkdir -p ../rn-tarball
           npm pack --pack-destination ../rn-tarball
           ls -l ../rn-tarball
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: rn-tarball
           path: rn-tarball/react-native-snitch-*.tgz
@@ -76,17 +76,17 @@ jobs:
       run:
         working-directory: examples/expo52
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: examples/expo52/package-lock.json
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 17
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: rn-tarball
           path: rn-tarball
@@ -110,18 +110,18 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: |
             package-lock.json
             examples/expo52/package-lock.json
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: rn-tarball
           path: rn-tarball
@@ -190,7 +190,7 @@ jobs:
             --predicate 'process == "'"$APP_NAME"'"' > "$RUNNER_TEMP/report/app.log" 2>&1 || true
           cp "$RUNNER_TEMP/snitch-server.log" "$RUNNER_TEMP/report/" 2>/dev/null || true
           cp "$RUNNER_TEMP/xcodebuild.log" "$RUNNER_TEMP/report/" 2>/dev/null || true
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: expo52-ios-report
@@ -208,17 +208,17 @@ jobs:
       run:
         working-directory: examples/expo-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: examples/expo-latest/package-lock.json
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 17
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: rn-tarball
           path: rn-tarball
@@ -241,16 +241,16 @@ jobs:
     timeout-minutes: 75
     continue-on-error: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: examples/expo-latest/package-lock.json
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: rn-tarball
           path: rn-tarball
@@ -277,7 +277,7 @@ jobs:
           grep -E "error:|warning: .*(snitch|Snitch)|\*\* BUILD" "$RUNNER_TEMP/xcodebuild.log" | tail -100 || true
           if [ "$status" -ne 0 ]; then tail -150 "$RUNNER_TEMP/xcodebuild.log"; exit "$status"; fi
           test -d "build/Build/Products/Release-iphonesimulator/$APP_NAME.app"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: failure()
         with:
           name: expo-latest-ios-xcodebuild-log
