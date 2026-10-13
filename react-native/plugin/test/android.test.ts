@@ -34,6 +34,11 @@ const FULL = {
   videoMaxSeconds: 30,
   showTesterNotice: true,
   android: { releaseType: 'internal' },
+  captureConsole: true,
+  captureNetwork: true,
+  trackScreens: false,
+  crashPrompt: false,
+  checkInWhenInactive: true,
 };
 
 describe('applyAndroidManifest', () => {
@@ -60,7 +65,28 @@ describe('applyAndroidManifest', () => {
       ['io.github.monjar.snitch.VIDEO_MAX_SECONDS', '30'],
       ['io.github.monjar.snitch.SHOW_TESTER_NOTICE', 'true'],
       ['io.github.monjar.snitch.RELEASE_TYPE', 'internal'],
+      ['io.github.monjar.snitch.CAPTURE_CONSOLE', 'true'],
+      ['io.github.monjar.snitch.CAPTURE_NETWORK', 'true'],
+      ['io.github.monjar.snitch.TRACK_SCREENS', 'false'],
+      ['io.github.monjar.snitch.CRASH_PROMPT', 'false'],
+      ['io.github.monjar.snitch.CHECKIN_WHEN_INACTIVE', 'true'],
     ]);
+  });
+
+  it('writes none of the timeline and crash options when they are unset', () => {
+    const m = applyAndroidManifest(baseManifest(), resolve({ gesture: 'shake' }));
+    expect(snitchMetaData(m).map(([name]) => name)).toEqual([
+      'io.github.monjar.snitch.SERVER_URL',
+      'io.github.monjar.snitch.INGEST_KEY',
+      'io.github.monjar.snitch.GESTURE',
+    ]);
+  });
+
+  it('removes a timeline option again when it is dropped from app.json', () => {
+    const m = applyAndroidManifest(baseManifest(), resolve({ captureNetwork: true }));
+    expect(snitchMetaData(m)).toContainEqual(['io.github.monjar.snitch.CAPTURE_NETWORK', 'true']);
+    applyAndroidManifest(m, resolve());
+    expect(snitchMetaData(m).map(([name]) => name)).not.toContain('io.github.monjar.snitch.CAPTURE_NETWORK');
   });
 
   it('keeps the default trigger on Android for the iOS-only edge handle, and writes none of its options', () => {
@@ -165,9 +191,10 @@ describe('applyAndroidManifest', () => {
 
     it('serialises to the <meta-data>, <service> and <activity> elements the native SDK expects', async () => {
       const file = path.join(dir, 'AndroidManifest.xml');
-      const m = applyAndroidManifest(baseManifest(), resolve({ captureMode: 'system', videoMaxSeconds: 10 }));
+      const m = applyAndroidManifest(baseManifest(), resolve({ captureMode: 'system', videoMaxSeconds: 10, captureNetwork: true }));
       await AndroidConfig.Manifest.writeAndroidManifestAsync(file, m);
       const xml = readFileSync(file, 'utf8');
+      expect(xml).toContain('<meta-data android:name="io.github.monjar.snitch.CAPTURE_NETWORK" android:value="true"/>');
       expect(xml).toContain(`<meta-data android:name="io.github.monjar.snitch.SERVER_URL" android:value="${SERVER_URL}"/>`);
       expect(xml).toContain(`<meta-data android:name="io.github.monjar.snitch.INGEST_KEY" android:value="${INGEST_KEY}"/>`);
       expect(xml).toContain('<meta-data android:name="io.github.monjar.snitch.VIDEO_MAX_SECONDS" android:value="10"/>');
@@ -178,7 +205,7 @@ describe('applyAndroidManifest', () => {
 
       const reread = await AndroidConfig.Manifest.readAndroidManifestAsync(file);
       const before = JSON.parse(JSON.stringify(reread));
-      expect(applyAndroidManifest(reread, resolve({ captureMode: 'system', videoMaxSeconds: 10 }))).toEqual(before);
+      expect(applyAndroidManifest(reread, resolve({ captureMode: 'system', videoMaxSeconds: 10, captureNetwork: true }))).toEqual(before);
     });
   });
 });

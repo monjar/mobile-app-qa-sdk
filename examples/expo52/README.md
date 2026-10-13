@@ -4,7 +4,10 @@ Expo 52 / React Native 0.76.9 with the new architecture, Reanimated 3, Gesture H
 Skia 1.5 (the same stack as Mochiro). One screen exercises what a report must get right:
 long-press rows and a two-finger pan (touch cancellation), an animated Skia canvas (Metal
 content in the video), a `TextInput` and a `testID="snitch-mask-…"` view (masking), and a
-"Report" button (`Snitch.show()`).
+"Report" button (`Snitch.show()`). `captureNetwork` is on, and once Snitch is active the app calls
+`Snitch.setScreen('Home')`, logs `snitch-e2e: ready` and fetches `http://localhost:8080/health` (the
+local Snitch server under a name Snitch doesn't treat as its own), so a report's timeline has a
+screen, a JavaScript log line and a request.
 
 `plugins/withFmtXcode26Patch.js` (copied from mochiro-mobile) lets RN 0.76 build with Xcode 26.
 

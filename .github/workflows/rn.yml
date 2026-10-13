@@ -168,11 +168,15 @@ jobs:
           xcrun simctl boot "$SIM_UDID" || true
           xcrun simctl bootstatus "$SIM_UDID" -b
           xcrun simctl install "$SIM_UDID" "examples/expo52/ios/build/Build/Products/Release-iphonesimulator/$APP_NAME.app"
-          SIMCTL_CHILD_SNITCH_DEBUG_AUTOREPORT=10 \
+          SIMCTL_CHILD_SNITCH_DEBUG_AUTOREPORT=15 \
           SIMCTL_CHILD_SNITCH_DEBUG_SERVER_URL=http://127.0.0.1:8080 \
             xcrun simctl launch "$SIM_UDID" io.github.monjar.snitch.expo52
       - name: Wait for the report
-        run: node scripts/ci-await-report.mjs --server http://127.0.0.1:8080 --description autoreport --out "$RUNNER_TEMP/report" --timeout 600
+        # App.tsx logs, fetches localhost:8080/health (the SDK's own 127.0.0.1 host is never
+        # recorded) and names the screen once Snitch is active, before the autoreport fires.
+        run: >-
+          node scripts/ci-await-report.mjs --server http://127.0.0.1:8080 --description autoreport --out "$RUNNER_TEMP/report" --timeout 600
+          --expect-timeline log,net,screen,app --expect-log "snitch-e2e: ready" --expect-net "localhost:8080/health" --expect-screen Home --expect-checkin ios
       - name: Check the video
         run: |
           if [ -f "$RUNNER_TEMP/report/video.mp4" ]; then
@@ -234,7 +238,7 @@ jobs:
         run: ./gradlew :app:assembleDebug --no-daemon --stacktrace -PreactNativeArchitectures=x86_64
 
   expo-latest-ios:
-    name: expo-latest ios (Release simulator build)
+    name: expo-latest ios (Release simulator build + end-to-end report)
     needs: plugin
     # macos-26 for Xcode 26.4+: expo-modules-jsi 57.x does not compile with Xcode 26.2/26.3 (expo/expo#50067).
     runs-on: macos-26
@@ -269,6 +273,7 @@ jobs:
         run: |
           xcodebuild -version
           APP_NAME=$(basename *.xcworkspace .xcworkspace)
+          echo "APP_NAME=$APP_NAME" >> "$GITHUB_ENV"
           status=0
           xcodebuild -workspace "$APP_NAME.xcworkspace" -scheme "$APP_NAME" -configuration Release \
             -sdk iphonesimulator -destination "generic/platform=iOS Simulator" -derivedDataPath build \
@@ -277,9 +282,42 @@ jobs:
           grep -E "error:|warning: .*(snitch|Snitch)|\*\* BUILD" "$RUNNER_TEMP/xcodebuild.log" | tail -100 || true
           if [ "$status" -ne 0 ]; then tail -150 "$RUNNER_TEMP/xcodebuild.log"; exit "$status"; fi
           test -d "build/Build/Products/Release-iphonesimulator/$APP_NAME.app"
+      - name: Pick a simulator
+        run: |
+          UDID=$(xcrun simctl list devices available -j | node -e '
+            const d = JSON.parse(require("fs").readFileSync(0, "utf8")).devices;
+            const ios = Object.keys(d).filter((k) => k.includes("iOS")).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+            for (const k of ios) { const p = d[k].find((x) => x.isAvailable && /^iPhone/.test(x.name)); if (p) { console.log(p.udid); break; } }')
+          test -n "$UDID"
+          echo "SIM_UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl list devices | grep "$UDID"
+      - name: Start the Snitch server
+        run: bash scripts/ci-start-server.sh
+      - name: Boot, install, launch with a debug autoreport
+        run: |
+          xcrun simctl boot "$SIM_UDID" || true
+          xcrun simctl bootstatus "$SIM_UDID" -b
+          xcrun simctl install "$SIM_UDID" "examples/expo-latest/ios/build/Build/Products/Release-iphonesimulator/$APP_NAME.app"
+          SIMCTL_CHILD_SNITCH_DEBUG_AUTOREPORT=15 \
+          SIMCTL_CHILD_SNITCH_DEBUG_SERVER_URL=http://127.0.0.1:8080 \
+            xcrun simctl launch "$SIM_UDID" io.github.monjar.snitch.expolatest
+      - name: Wait for the report
+        run: >-
+          node scripts/ci-await-report.mjs --server http://127.0.0.1:8080 --description autoreport --out "$RUNNER_TEMP/report" --timeout 600
+          --expect-timeline log,net,screen,app --expect-log "snitch-e2e: ready" --expect-net "localhost:8080/health" --expect-screen Home --expect-checkin ios
+      - name: Collect diagnostics
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/report"
+          xcrun simctl io "$SIM_UDID" screenshot "$RUNNER_TEMP/report/simulator.png" || true
+          xcrun simctl spawn "$SIM_UDID" log show --last 20m --style compact \
+            --predicate 'process == "'"$APP_NAME"'"' > "$RUNNER_TEMP/report/app.log" 2>&1 || true
+          cp "$RUNNER_TEMP/snitch-server.log" "$RUNNER_TEMP/report/" 2>/dev/null || true
+          cp "$RUNNER_TEMP/xcodebuild.log" "$RUNNER_TEMP/report/" 2>/dev/null || true
       - uses: actions/upload-artifact@v6
-        if: failure()
+        if: always()
         with:
-          name: expo-latest-ios-xcodebuild-log
-          path: ${{ runner.temp }}/xcodebuild.log
+          name: expo-latest-ios-report
+          path: ${{ runner.temp }}/report
           if-no-files-found: ignore
+          retention-days: 14

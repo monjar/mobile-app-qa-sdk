@@ -45,6 +45,10 @@ class SnitchModule(reactContext: ReactApplicationContext) : NativeSnitchSpec(rea
         Snitch.log(message, logLevel(level))
     }
 
+    override fun setScreen(name: String?) {
+        Snitch.setScreen(name)
+    }
+
     override fun setEnabled(enabled: Boolean) {
         Snitch.setEnabled(enabled)
     }

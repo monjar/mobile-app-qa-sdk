@@ -24,7 +24,7 @@ Pod::Spec.new do |s|
   s.swift_version = '5.9'
   s.frameworks = 'UIKit', 'SwiftUI', 'AVFoundation', 'CoreMedia', 'CoreVideo', 'ImageIO',
                  'ReplayKit', 'CoreMotion', 'StoreKit', 'Network', 'CryptoKit',
-                 'CoreGraphics', 'CoreImage', 'QuartzCore'
+                 'CoreGraphics', 'CoreImage', 'QuartzCore', 'MetricKit', 'OSLog'
 
   # Must be set before install_modules_dependencies, which merges into it.
   s.pod_target_xcconfig = {

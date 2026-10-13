@@ -44,6 +44,22 @@ describe('withSnitch', () => {
     ]);
   });
 
+  it('writes the timeline options to both platforms', async () => {
+    const config = withSnitch(baseConfig(), { serverUrl: SERVER_URL, ingestKey: INGEST_KEY, captureNetwork: true, captureConsole: false });
+    const { infoPlist, manifest } = await introspect(config);
+
+    expect(infoPlist?.Snitch).toEqual({ ServerURL: SERVER_URL, IngestKey: INGEST_KEY, CaptureConsole: false, CaptureNetwork: true });
+    expect(infoPlist?.CustomKey).toBe('kept');
+    const app = AndroidConfig.Manifest.getMainApplicationOrThrow(manifest!);
+    const meta = (app['meta-data'] ?? []).filter((e) => e.$['android:name'].startsWith('io.github.monjar.snitch.'));
+    expect(meta.map((e) => [e.$['android:name'], e.$['android:value']])).toEqual([
+      ['io.github.monjar.snitch.SERVER_URL', SERVER_URL],
+      ['io.github.monjar.snitch.INGEST_KEY', INGEST_KEY],
+      ['io.github.monjar.snitch.CAPTURE_CONSOLE', 'false'],
+      ['io.github.monjar.snitch.CAPTURE_NETWORK', 'true'],
+    ]);
+  });
+
   it('runs once even when listed twice', () => {
     const once = withSnitch(baseConfig(), { serverUrl: SERVER_URL, ingestKey: INGEST_KEY });
     const twice = withSnitch(once, { serverUrl: 'https://other.example.com', ingestKey: INGEST_KEY });

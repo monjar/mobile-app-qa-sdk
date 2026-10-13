@@ -630,8 +630,10 @@ headers or bodies. Requests to the Snitch server itself are never recorded.
   `canInit(with:)`: it answers false unless Snitch is active with network capture
   on, the request is http(s), not for the Snitch server, and not already being
   forwarded. An inert SDK (store build) therefore never touches a request.
-  Not covered: sessions the app or other libraries create themselves without
-  `captureNetwork(in:)` (e.g. `expo/fetch`).
+  Expo's streaming `expo/fetch` gets the same configuration through
+  `EXFetchCustomExtension.setCustomURLSessionConfigurationProvider` (Expo 52+, looked
+  up at run time). Not covered: sessions other libraries create themselves without
+  `captureNetwork(in:)`.
 - Android: `SnitchOkHttpInterceptor` (OkHttp is a compileOnly dependency; the
   class is only loaded when used) and `Snitch.recordNetwork(…)` for any other
   client. React Native: the RN module's init provider calls
@@ -689,7 +691,7 @@ Blur is applied to the pixels, so blurred content is not recoverable from the fi
   `SnitchOptions` gains `captureConsole`, `captureNetwork`, `trackScreens`,
   `crashPrompt`, `checkInWhenInactive`. Bridge: `SnitchBridge.setScreen(_:)`,
   `SnitchBridge.logJS(_ message: String, level: String)`, `SnitchBridge.isActive()`,
-  `SnitchBridge.networkProtocolClass()`, notification `SnitchDidActivate`.
+  `SnitchBridge.networkProtocolClass()`, notification `SNSnitchDidActivate`.
 - Kotlin: `Snitch.setScreen(name: String?)`, `Snitch.recordNetwork(method, url,
   status, durationMs, requestBytes, responseBytes, error)`, `SnitchOkHttpInterceptor()`;
   same `SnitchOptions` fields.

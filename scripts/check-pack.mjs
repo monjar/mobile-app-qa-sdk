@@ -25,11 +25,13 @@ const REQUIRED = [
   'ios/RNSnitch.h',
   'ios/RNSnitch.mm',
   'ios/SNAutoStart.m',
+  'ios/SNReactNativeCapture.m',
   'react-native-snitch.podspec',
   // Android: Kotlin core (copied), TurboModule, Gradle build, manifest
   'android/src/main/java/io/github/monjar/snitch/Snitch.kt',
   'android/src/main/java/io/github/monjar/snitch/rn/SnitchModule.kt',
   'android/src/main/java/io/github/monjar/snitch/rn/SnitchPackage.kt',
+  'android/src/main/java/io/github/monjar/snitch/rn/SnitchReactNativeInitProvider.kt',
   'android/build.gradle',
   'android/proguard-rules.pro',
   'android/src/main/AndroidManifest.xml',

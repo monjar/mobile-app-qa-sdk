@@ -86,6 +86,11 @@ RCT_EXPORT_METHOD(log : (NSString *)message level : (NSString *)level)
   [SNSnitchBridge log:message level:level];
 }
 
+RCT_EXPORT_METHOD(setScreen : (NSString *_Nullable)name)
+{
+  [SNSnitchBridge setScreen:SNNullable(name)];
+}
+
 RCT_EXPORT_METHOD(setEnabled : (BOOL)enabled)
 {
   [SNSnitchBridge setEnabled:enabled];

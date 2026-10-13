@@ -102,7 +102,7 @@ What arrives with a report, without touching Mochiro's code:
 |---|---|
 | JS console | Thin. Mochiro's `logger` only prints to the console in `__DEV__`, so release builds mostly show React and library warnings/errors. The forwarder below fixes that, but it is a code change. |
 | Native log (os_log) | Yes: expo modules, networking errors, RN's own messages. |
-| Network | With `captureNetwork`: every request made through React Native's `fetch` (the `ServerClient` calls). **Not** the streaming conversation, which goes through `expo/fetch` and its own URL session. |
+| Network | With `captureNetwork`: the `ServerClient` calls through React Native's `fetch`, and the streaming conversation through `expo/fetch` (Snitch sets Expo's session provider too). The stream is relayed chunk by chunk, but check a few conversations on TestFlight before relying on it. |
 | Screens | Almost nothing: one Stack with headers hidden, so the native inference sees the same screen. Route names need `useSnitchScreen(usePathname())` in `app/_layout.tsx`, a code change. |
 | Touches, foreground/background | Yes. |
 | Crash follow-up | Yes, from MetricKit on the next launch, with the previous session's log lines. |

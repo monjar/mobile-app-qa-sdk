@@ -52,6 +52,11 @@ needs a rebuild, because they end up in Info.plist and AndroidManifest.xml.
 | `captureMode` | string | `"snapshot"` | `snapshot` (the SDK draws the app's windows a few times a second, no prompt), `system` (ReplayKit / MediaProjection, OS consent prompt each session) or `off` (screenshots only). |
 | `videoMaxSeconds` | integer | `30` | Longest clip a tester can attach, 1–30. |
 | `showTesterNotice` | boolean | `true` | One-time card telling testers about the gesture and the on-device recording. |
+| `captureConsole` | boolean | `true` | Console lines in the report [timeline](#timeline): the JavaScript console, plus os_log (iOS) / logcat (Android). |
+| `captureNetwork` | boolean | `false` | Request summaries in the timeline: method, URL with query values blanked, status, timing, sizes. Never headers or bodies. See [what it covers](#network-requests). |
+| `trackScreens` | boolean | `true` | Screen changes in the timeline, named natively until the app names them (see [screens](#screens)). |
+| `crashPrompt` | boolean | `true` | On the next launch after the app closed unexpectedly, offer testers to report it with the crash diagnostic attached (needs a Snitch 0.3 server). |
+| `checkInWhenInactive` | boolean | `false` | When the build's release type can't be detected (`unknown`), send one check-in per launch so it shows on the Devices page. The only request an inert SDK can make. |
 | `android.releaseType` | string | detected | Force the Android release type (any value above, or `unknown`), e.g. per build profile. |
 | `android.detectScreenshots` | boolean | `false` | Adds `DETECT_SCREEN_CAPTURE` so `screenshotPrompt` works on Android 14+. Ignored when `screenshotPrompt` is `false`. |
 
@@ -74,14 +79,16 @@ options leave them out (an option always wins). They are read at **prebuild** ti
 
 - **iOS:** a `Snitch` dictionary in Info.plist (`ServerURL`, `IngestKey`, and `Enabled`,
   `EnabledReleaseTypes`, `Gesture`, `ScreenshotPrompt`, `MaskTextInputs`, `CaptureMode`,
-  `VideoMaxSeconds`, `ShowTesterNotice`, `EdgeHandleSide`, `EdgeHandlePosition`, `EdgeHandleColor`
-  when set). The dictionary belongs to the plugin and is
-  rewritten on every prebuild.
+  `VideoMaxSeconds`, `ShowTesterNotice`, `EdgeHandleSide`, `EdgeHandlePosition`, `EdgeHandleColor`,
+  `CaptureConsole`, `CaptureNetwork`, `TrackScreens`, `CrashPrompt`, `CheckInWhenInactive` when set).
+  The dictionary belongs to the plugin and is rewritten on every prebuild.
 - **Android:** `<meta-data android:name="io.github.monjar.snitch.*">` entries on `<application>`
-  (`SERVER_URL`, `INGEST_KEY`, … `RELEASE_TYPE`), replaced on every prebuild.
+  (`SERVER_URL`, `INGEST_KEY`, … `RELEASE_TYPE`, `CAPTURE_CONSOLE`, `CAPTURE_NETWORK`,
+  `TRACK_SCREENS`, `CRASH_PROMPT`, `CHECKIN_WHEN_INACTIVE`), replaced on every prebuild.
 - Nothing else: not the Podfile, entitlements, Gradle files or other plugins' output. The pod and
   the Gradle module come from autolinking; the library manifest adds `INTERNET`,
-  `ACCESS_NETWORK_STATE` and a small init provider that starts the SDK.
+  `ACCESS_NETWORK_STATE`, a small init provider that starts the SDK, and one that adds Snitch to
+  React Native's HTTP client when `captureNetwork` is on.
 
 ### `captureMode: "system"` on Android
 
@@ -119,20 +126,100 @@ build that artifact with `android.releaseType: "internal"` (for example from an 
 that reads an environment variable set only in that EAS profile), rather than enabling `play`
 for every Play install.
 
+## Timeline
+
+Every report carries a timeline of the last few minutes before it was sent: console lines,
+requests, screen changes, touches and foreground/background, lined up with the video in the
+dashboard. It lives in memory (only the newest log lines are also kept on the device, for the
+`crashPrompt` follow-up) and leaves the device only inside a report a tester sends. Nothing is
+recorded while Snitch is inert (store builds) or paused. Each kind can be switched off with its
+option, and per project from the server.
+
+### Console
+
+On by default (`captureConsole`). JavaScript `console.log` / `info` / `warn` / `error` lines show
+up with their level, `console.debug` as debug. Native logs come along too: os_log / NSLog lines of
+the app process on iOS, the app's logcat on Android. On iOS, once Snitch is active, React Native's
+log threshold is kept at info or lower so `console.log` lines are not filtered out. Anything the app
+logs can end up in a report, so keep secrets out of logs or set `captureConsole: false`.
+
+### Network requests
+
+Off by default (`captureNetwork: true` turns it on). A request is stored as its method, URL, status,
+duration, request and response sizes and error text. The URL loses credentials and the fragment,
+and every query value becomes `*` (`/search?q=*&page=*`); the path is kept as sent, so think about
+identifiers in paths before turning it on. Headers and bodies are never read. Requests to the
+Snitch server itself are never recorded.
+
+| | iOS | Android |
+|---|---|---|
+| `fetch`, `XMLHttpRequest`, axios and other libraries built on them | ✓ | ✓ |
+| `<Image>` downloads | ✓ | ✓ |
+| `expo/fetch` (streaming) | ✓ (through Expo's `EXFetchCustomExtension`) | ✓ |
+| Native code: `URLSession.shared` (iOS), clients from React Native's `OkHttpClientProvider` (Android) | ✓ | ✓ |
+| Other native libraries' own sessions or clients | — | — |
+
+React Native sets up its HTTP client at launch, before any JavaScript runs, so Snitch joins it
+only through the plugin option (the `CaptureNetwork` Info.plist key / `CAPTURE_NETWORK`
+meta-data); `Snitch.start({ captureNetwork: true })` alone doesn't cover React Native's requests.
+If your app installs its own `RCTSetCustomNSURLSessionConfigurationProvider` (iOS) or
+`OkHttpClientProvider.setOkHttpClientFactory` (Android), it replaces Snitch's: put
+`SNSnitchBridge.networkProtocolClass` first in that configuration's `protocolClasses`, or add
+`SnitchOkHttpInterceptor()` to the client your factory builds (`addInterceptor`). The same goes
+for `EXFetchCustomExtension.setCustomURLSessionConfigurationProvider` on iOS.
+
+Requests pass through Snitch's forwarding `URLProtocol` on iOS, which relays every chunk as it
+arrives, so streamed responses (server-sent events over `expo/fetch`) keep streaming. Still, check
+your streaming screens on a device once after turning network capture on.
+
+### Screens
+
+On by default (`trackScreens`). Snitch names screens natively (the top view controller on iOS, the
+resumed activity on Android), which in a React Native app is mostly one name. Name them from
+JavaScript instead; once you do, native naming stops for the rest of the session:
+
+```tsx
+// app/_layout.tsx (expo-router)
+import { usePathname } from 'expo-router';
+import { useSnitchScreen } from 'react-native-snitch';
+
+export default function RootLayout() {
+  useSnitchScreen(usePathname());
+  // …
+}
+```
+
+```tsx
+// React Navigation
+import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
+import { trackNavigationContainer } from 'react-native-snitch';
+
+const navigationRef = useNavigationContainerRef();
+useEffect(() => trackNavigationContainer(navigationRef), [navigationRef]);
+return <NavigationContainer ref={navigationRef}>…</NavigationContainer>;
+```
+
+Neither router is a dependency of react-native-snitch. `Snitch.setScreen('Checkout')` names a
+screen directly. The newest name is also the report's screen in the dashboard.
+
 ## JavaScript API
 
 Optional; everything above works without it.
 
 ```ts
-import { Snitch } from 'react-native-snitch';
+import { Snitch, useSnitchScreen, trackNavigationContainer } from 'react-native-snitch';
 
 Snitch.show();                                        // open the report sheet
 Snitch.setUser({ id: user.id, email: user.email });
 Snitch.setMetadata('plan', 'pro');                    // null removes the key
 Snitch.log('checkout started');
+Snitch.setScreen('Checkout');                         // null clears it
 Snitch.setEnabled(false);                             // pause at runtime
 Snitch.isEnabled();
 Snitch.releaseType();                                 // 'testflight', 'debug', …
+
+useSnitchScreen(name);                                // hook: setScreen whenever name changes
+trackNavigationContainer(navigationRef);              // React Navigation; returns a stop function
 ```
 
 `Snitch.start({ serverUrl, ingestKey, ...options })` exists for apps that don't use the plugin
@@ -156,3 +243,6 @@ give it a `testID` that starts with `snitch-mask`:
   or add an exception for your server's host.
 - **Nothing happens on a three-finger hold**: check `Snitch.releaseType()` against
   `enabledReleaseTypes`, and that VoiceOver / TalkBack is off (the gesture is disabled then).
+- **No requests in the timeline**: `captureNetwork` needs a rebuild, the project's timeline settings
+  on the server may switch requests off, and some clients are not covered (see
+  [network requests](#network-requests)). Requests to the Snitch server itself never appear.
