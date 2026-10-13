@@ -144,6 +144,14 @@ jobs:
         run: |
           command -v ffprobe >/dev/null || { sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg; }
           bash scripts/verify-video.sh "$RUNNER_TEMP/report/video.mp4"
+      - name: Show what went wrong
+        if: failure()
+        run: |
+          find android/example/build/outputs/androidTest-results -name '*.xml' -exec grep -A12 "<failure" {} + | head -80 || true
+          if [ -f "$RUNNER_TEMP/logcat.txt" ]; then
+            grep -E " [EF] |FATAL|ANR in|Snitch|TestRunner" "$RUNNER_TEMP/logcat.txt" | tail -150
+          fi
+          tail -40 "$RUNNER_TEMP/snitch-server.log" || true
       - name: Upload report, logs and test results
         if: always()
         uses: actions/upload-artifact@v6
