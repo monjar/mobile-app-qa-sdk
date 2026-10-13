@@ -162,17 +162,21 @@ jobs:
           path: ${{ runner.temp }}/demo
           if-no-files-found: ignore
           retention-days: 30
+      # Long lines and smaller JPEGs (long edge 1600 px; the artifact keeps the full-size PNGs), so
+      # the whole dump fits in the last few hundred lines of the log, where log readers that only
+      # fetch the tail can reach it.
       - name: Print the images and the report as base64
         if: always()
         run: |
           cd "$RUNNER_TEMP/demo"
           for f in 0*.png 99-last.png; do
             [ -f "$f" ] || continue
-            sips -s format jpeg -s formatOptions 85 "$f" --out "${f%.png}.jpg" >/dev/null
+            sips -Z 1600 -s format jpeg -s formatOptions 82 "$f" --out "${f%.png}.jpg" >/dev/null
           done
-          for f in 0*.jpg 99-last.jpg report/*; do
+          for f in report/* 99-last.jpg 0*.jpg; do
             [ -f "$f" ] || continue
             echo "===== BEGIN $f ($(wc -c < "$f") bytes) ====="
-            base64 -b 76 -i "$f"
+            base64 -i "$f" | fold -w 8000
+            echo
             echo "===== END $f ====="
           done
