@@ -109,10 +109,10 @@ export default function App() {
   useEffect(() => {
     if (demoMode() !== 'story') return;
     const steps: [number, () => void][] = [
-      [2500, () => setTab('Done')],
-      [3500, () => setTab('Today')],
-      [4500, () => latest.current.add('Book the dentist')],
-      [6000, () => {
+      [4000, () => setTab('Done')],
+      [5500, () => setTab('Today')],
+      [7500, () => latest.current.add('Book the dentist')],
+      [9000, () => {
         const milk = latest.current.todos.find((t) => t.id === 3);
         if (milk) latest.current.toggle(milk);
       }],

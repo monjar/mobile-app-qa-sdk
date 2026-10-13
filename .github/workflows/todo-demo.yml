@@ -139,8 +139,10 @@ jobs:
           xcrun simctl terminate "$SIM_UDID" io.github.monjar.snitch.todo || true
       - name: "4. The bug, then a debug autoreport"
         run: |
-          SIMCTL_CHILD_SNITCH_DEBUG_AUTOREPORT=11 xcrun simctl launch "$SIM_UDID" io.github.monjar.snitch.todo -demo story
-          sleep 9
+          # The autoreport clip is the last 5 s (7 to 12 s): it shows the todo being added and the
+          # tick at 9 s rolling back.
+          SIMCTL_CHILD_SNITCH_DEBUG_AUTOREPORT=12 xcrun simctl launch "$SIM_UDID" io.github.monjar.snitch.todo -demo story
+          sleep 10.5
           xcrun simctl io "$SIM_UDID" screenshot "$RUNNER_TEMP/demo/04-rollback.png"
       - name: Wait for the report
         run: >-
