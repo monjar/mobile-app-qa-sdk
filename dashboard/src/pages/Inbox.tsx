@@ -154,10 +154,12 @@ export function Inbox() {
                       <span>
                         {t.deviceModel} · {osName(t.platform)} {t.osVersion}
                       </span>
+                      {t.screen && <span title="Screen">on {t.screen}</span>}
                       <span>
                         v{t.appVersion} ({t.appBuild}) · {RELEASE_LABEL[t.releaseType]}
                       </span>
                       {projectId === 'all' && <span>{projectName(t.projectId)}</span>}
+                      {t.fixedIn && <span className="pill resolved">Fixed in {t.fixedIn}</span>}
                       {t.uploadState !== 'complete' && <span className="pill">{t.uploadState === 'pending' ? 'Uploading…' : 'Incomplete'}</span>}
                     </div>
                   </span>

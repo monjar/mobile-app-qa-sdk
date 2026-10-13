@@ -9,9 +9,15 @@
  * screenshots and video (`<View testID="snitch-mask-card">`). Editable text
  * inputs are masked by default.
  *
+ * Screens: `useSnitchScreen(usePathname())` (expo-router) or
+ * `trackNavigationContainer(navigationRef)` (React Navigation) name the screen
+ * in the report timeline; neither router is a dependency.
+ *
  * Every call is a no-op (with one console warning) when the native module is
  * missing: Expo Go, the old architecture, or an app not rebuilt after install.
  */
+import { useEffect } from 'react';
+
 import NativeSnitch, { type Spec } from './NativeSnitch';
 
 /** How the running build was distributed, as the SDK detects it at runtime. */
@@ -50,6 +56,21 @@ export interface SnitchOptions {
   edgeHandlePosition?: number;
   /** Edge handle tint, "#RRGGBB" or "#RRGGBBAA". Default: the system tint. */
   edgeHandleColor?: string;
+  /** Console lines in the report timeline (JavaScript console, os_log / logcat). Default true. */
+  captureConsole?: boolean;
+  /**
+   * Request summaries in the report timeline (method, URL without query values, status, timing, sizes;
+   * never headers or bodies). Default false. React Native's own fetch / XMLHttpRequest are only covered
+   * when it is also set in Info.plist / the manifest (the config plugin's `captureNetwork`): React
+   * Native builds its HTTP client before JavaScript runs.
+   */
+  captureNetwork?: boolean;
+  /** Screen changes in the report timeline, inferred natively until the app calls `Snitch.setScreen`. Default true. */
+  trackScreens?: boolean;
+  /** After an unexpected exit, offer to report it with the crash diagnostic. Default true. */
+  crashPrompt?: boolean;
+  /** When the release type can't be detected ("unknown"), send one diagnostic check-in per launch. Default false. */
+  checkInWhenInactive?: boolean;
 }
 
 export interface SnitchStartOptions extends SnitchOptions {
@@ -79,6 +100,11 @@ const OPTION_KEYS: readonly (keyof SnitchOptions)[] = [
   'edgeHandleSide',
   'edgeHandlePosition',
   'edgeHandleColor',
+  'captureConsole',
+  'captureNetwork',
+  'trackScreens',
+  'crashPrompt',
+  'checkInWhenInactive',
 ];
 
 const RELEASE_TYPES: readonly SnitchReleaseType[] = ['debug', 'adhoc', 'enterprise', 'testflight', 'appstore', 'internal', 'play', 'unknown'];
@@ -111,6 +137,12 @@ function call<T>(name: string, fallback: T, fn: (native: Spec) => T): T {
 }
 
 const optionalString = (v: unknown): string | null => (typeof v === 'string' ? v : v == null ? null : String(v));
+
+/** A screen name as the timeline stores it: trimmed; null for nothing (null, undefined, blank). */
+function screenName(v: unknown): string | null {
+  const name = optionalString(v)?.trim();
+  return name ? name : null;
+}
 
 function nativeOptions(options: SnitchOptions): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -159,6 +191,15 @@ export const Snitch = {
     call('log', undefined, (n) => n.log(String(message), level));
   },
 
+  /**
+   * Names the screen the tester is on: a `screen` event in the report timeline, and the report's
+   * screen. Once the app calls this, Snitch stops inferring screen names natively for the rest of
+   * the session. null (or a blank name) clears it.
+   */
+  setScreen(name: string | null | undefined): void {
+    call('setScreen', undefined, (n) => n.setScreen(screenName(name)));
+  },
+
   /** Pauses (false) or resumes (true) Snitch at runtime: gesture, capture and prompts. */
   setEnabled(enabled: boolean): void {
     call('setEnabled', undefined, (n) => n.setEnabled(Boolean(enabled)));
@@ -177,5 +218,94 @@ export const Snitch = {
     });
   },
 } as const;
+
+/**
+ * Calls `Snitch.setScreen(name)` whenever `name` changes. Meant for a value that follows
+ * navigation, e.g. in an expo-router root layout:
+ *
+ *   useSnitchScreen(usePathname());
+ *
+ * null, undefined and blank names are skipped, so a value that isn't known yet changes nothing.
+ */
+export function useSnitchScreen(name: string | null | undefined): void {
+  const screen = screenName(name);
+  useEffect(() => {
+    if (screen !== null) Snitch.setScreen(screen);
+  }, [screen]);
+}
+
+/**
+ * The parts of a React Navigation container ref that `trackNavigationContainer` uses. Typed
+ * structurally, so react-native-snitch doesn't depend on React Navigation.
+ */
+export interface SnitchNavigationContainer {
+  addListener(event: 'state', listener: () => void): (() => void) | void;
+  getCurrentRoute(): { name: string } | null | undefined;
+  isReady?(): boolean;
+}
+
+/**
+ * A container ref from `useNavigationContainerRef()` / `createNavigationContainerRef()`, or a
+ * `useRef` whose `current` is the container.
+ */
+export type SnitchNavigationContainerRef = SnitchNavigationContainer | { readonly current: SnitchNavigationContainer | null };
+
+function resolveContainer(ref: SnitchNavigationContainerRef | null | undefined): SnitchNavigationContainer | null {
+  if (ref == null) return null;
+  if (typeof (ref as SnitchNavigationContainer).addListener === 'function') return ref as SnitchNavigationContainer;
+  const current = (ref as { readonly current: SnitchNavigationContainer | null }).current;
+  return current != null && typeof current.addListener === 'function' ? current : null;
+}
+
+/**
+ * Follows a React Navigation container: the focused route's name becomes the screen
+ * (`Snitch.setScreen`) after every navigation state change. Returns a function that stops it.
+ *
+ *   const navigationRef = useNavigationContainerRef();
+ *   useEffect(() => trackNavigationContainer(navigationRef), [navigationRef]);
+ *   <NavigationContainer ref={navigationRef}>…</NavigationContainer>
+ *
+ * A ref from `useNavigationContainerRef()` / `createNavigationContainerRef()` can be passed before
+ * the container mounts; a plain `useRef` must already point at it.
+ */
+export function trackNavigationContainer(ref: SnitchNavigationContainerRef): () => void {
+  const container = resolveContainer(ref);
+  if (!container) {
+    console.warn(
+      '[react-native-snitch] trackNavigationContainer: no navigation container yet. Pass the ref from ' +
+        'useNavigationContainerRef() or createNavigationContainerRef(), or call it once the container has mounted.',
+    );
+    return () => {};
+  }
+
+  let active = true;
+  let last: string | null = null;
+  const update = () => {
+    if (!active) return;
+    try {
+      // getCurrentRoute() logs an error on a container ref that isn't attached yet.
+      if (container.isReady && !container.isReady()) return;
+      const name = screenName(container.getCurrentRoute()?.name);
+      if (name === null || name === last) return;
+      last = name;
+      Snitch.setScreen(name);
+    } catch (error) {
+      console.warn('[react-native-snitch] trackNavigationContainer failed:', error);
+    }
+  };
+
+  let unsubscribe: (() => void) | void;
+  try {
+    unsubscribe = container.addListener('state', update);
+  } catch (error) {
+    console.warn('[react-native-snitch] trackNavigationContainer failed:', error);
+  }
+  update();
+
+  return () => {
+    active = false;
+    if (typeof unsubscribe === 'function') unsubscribe();
+  };
+}
 
 export default Snitch;

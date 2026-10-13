@@ -1,6 +1,7 @@
 // Remote configuration fetch and cache (spec §2.2).
 //
-// GET {ServerURL}/api/v1/sdk/config with If-None-Match when an ETag is cached.
+// GET {ServerURL}/api/v1/sdk/config with If-None-Match when an ETag is cached;
+// the query carries the check-in fields (CheckIn.swift).
 // The cache (config + ETag + fetchedAt) lives in UserDefaults under
 // `snitch.remoteConfig`. A 304 refreshes fetchedAt; any failure keeps the cache.
 // Main-thread confined except for the network round trip.
@@ -13,6 +14,8 @@ struct RemoteConfigQuery: Equatable {
     var build: String
     var os: String
     var health: String
+    /// installId & co. (spec §11.1); appended after the 0.1 parameters.
+    var checkIn: CheckInFields?
 
     var queryItems: [URLQueryItem] {
         [
@@ -22,7 +25,7 @@ struct RemoteConfigQuery: Equatable {
             URLQueryItem(name: "build", value: String(build.prefix(64))),
             URLQueryItem(name: "os", value: String(os.prefix(32))),
             URLQueryItem(name: "health", value: health),
-        ]
+        ] + (checkIn?.queryItems ?? [])
     }
 }
 

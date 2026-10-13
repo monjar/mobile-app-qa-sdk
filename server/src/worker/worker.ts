@@ -3,18 +3,31 @@
  *
  * - route_ticket       — after a report completes: apply routing rules (auto → escalate, suggest → note)
  * - escalate           — send one escalation to its integration
- * - stale_upload_sweep — hourly: reports never completed within 24 h become `incomplete` (and are routed)
- * - retention_sweep    — daily: delete tickets past their project's retention, with their blobs
+ * - github_status      — close or reopen a ticket's GitHub issue to match its status (syncStatus)
+ * - github_comment     — post a Snitch comment to the ticket's GitHub issue (syncComments)
+ * - notify             — email an assignee or a reporter (project notification flags)
+ * - stale_upload_sweep — hourly: reports never completed within 24 h become `incomplete` (and are routed);
+ *                        partial uploads and temp files nobody owns are deleted
+ * - retention_sweep    — daily: delete tickets past their project's retention, with their blobs, and
+ *                        installs not seen for 180 days
  * - housekeeping       — daily: expired sessions, old finished jobs
+ * - backup             — every SNITCH_BACKUP_INTERVAL_HOURS: gzipped database copy to the backup target
  *
  * The loop is guarded (one tick at a time) and `stop()` waits for the tick in
  * flight, so shutdown never cuts a job in half.
  */
+import { GithubConfig } from '@snitch/contract';
 import type { Deps } from '../deps';
 import { errorMessage, log } from '../log';
 import { DAY_MS, HOUR_MS } from '../util/clock';
 import type { JobRow } from '../repo/jobs';
+import type { TicketRow } from '../repo/tickets';
 import { send, SendError } from '../integrations';
+import { syncComment, syncStatus } from '../integrations/githubSync';
+import { notificationFailed, sendNotification, type NotifyPayload } from '../mail/notifications';
+import { removePartials, sweepTempFiles } from '../storage/partials';
+import { INSTALL_RETENTION_MS } from '../repo/installs';
+import { backupTarget, runBackup } from './backup';
 
 export const JOB = {
   route: 'route_ticket',
@@ -22,6 +35,10 @@ export const JOB = {
   staleSweep: 'stale_upload_sweep',
   retention: 'retention_sweep',
   housekeeping: 'housekeeping',
+  githubStatus: 'github_status',
+  githubComment: 'github_comment',
+  notify: 'notify',
+  backup: 'backup',
 } as const;
 
 export const STALE_UPLOAD_MS = DAY_MS;
@@ -42,6 +59,57 @@ export function escalate(deps: Deps, ticketId: string, integrationId: string, us
   });
   deps.jobs.enqueue(JOB.escalate, { escalationId: esc.id, userId });
   return true;
+}
+
+/** Emails the new assignee, unless they assigned themselves or the project opted out. */
+export function queueAssignedNotification(deps: Deps, ticket: TicketRow, actorUserId: string, assignedEventId: number): boolean {
+  const userId = ticket.assignee_user_id;
+  if (!userId || userId === actorUserId || !deps.projects.get(ticket.project_id)?.notifyAssignees) return false;
+  const user = deps.users.get(userId);
+  if (!user || user.disabled_at !== null) return false;
+  const payload: NotifyPayload = { ticketId: ticket.id, to: 'assignee', email: user.email, userId, actorUserId };
+  return deps.jobs.enqueue(JOB.notify, { ...payload }, { dedupeKey: `${JOB.notify}:${assignedEventId}`, maxAttempts: 5 }) !== null;
+}
+
+/** Emails the reporter that their ticket was resolved, when the project opted in and they left an address. */
+export function queueResolvedNotification(deps: Deps, ticket: TicketRow, statusEventId: number): boolean {
+  if (ticket.status !== 'resolved' || !ticket.reporter_email || !deps.projects.get(ticket.project_id)?.notifyReporters) return false;
+  const payload: NotifyPayload = { ticketId: ticket.id, to: 'reporter', email: ticket.reporter_email };
+  return deps.jobs.enqueue(JOB.notify, { ...payload }, { dedupeKey: `${JOB.notify}:${statusEventId}`, maxAttempts: 5 }) !== null;
+}
+
+/** The ticket's sent GitHub escalations whose integration syncs `setting`. */
+function syncedEscalations(deps: Deps, ticketId: string, setting: 'syncStatus' | 'syncComments') {
+  return deps.integrations.sentGithubEscalations(ticketId).filter(({ integration }) => {
+    const cfg = GithubConfig.safeParse(JSON.parse(integration.config_json));
+    return cfg.success && cfg.data[setting];
+  });
+}
+
+/** After a user closed a ticket (for whatever reason) or reopened a closed one: close or reopen its GitHub issues. */
+export function queueGithubStatusSync(deps: Deps, ticketId: string, statusEventId: number): number {
+  let n = 0;
+  for (const { escalation } of syncedEscalations(deps, ticketId, 'syncStatus')) {
+    if (deps.jobs.enqueue(JOB.githubStatus, { escalationId: escalation.id }, { dedupeKey: `${JOB.githubStatus}:${escalation.id}:${statusEventId}` }) !== null) n++;
+  }
+  return n;
+}
+
+/** After a user commented: post the comment to the ticket's GitHub issues. */
+export function queueGithubCommentSync(deps: Deps, ticketId: string, commentEventId: number): number {
+  let n = 0;
+  for (const { escalation } of syncedEscalations(deps, ticketId, 'syncComments')) {
+    const payload = { escalationId: escalation.id, eventId: commentEventId };
+    if (deps.jobs.enqueue(JOB.githubComment, payload, { dedupeKey: `${JOB.githubComment}:${escalation.id}:${commentEventId}` }) !== null) n++;
+  }
+  return n;
+}
+
+/** Deletes a ticket with everything it owns on disk or in the bucket. */
+export async function deleteTicket(deps: Deps, ticketId: string): Promise<void> {
+  const removed = deps.tickets.delete(ticketId);
+  for (const key of removed.blobKeys) await deps.blobs.delete(key).catch(() => undefined);
+  await removePartials(deps.config.dataDir, removed.attachmentIds);
 }
 
 type Handler = (deps: Deps, payload: Record<string, unknown>, job: JobRow) => Promise<void>;
@@ -79,22 +147,45 @@ const handlers: Record<string, Handler> = {
     deps.tickets.touch(ticket.id);
   },
 
+  async [JOB.githubStatus](deps, payload) {
+    await syncStatus(deps, String(payload.escalationId));
+  },
+
+  async [JOB.githubComment](deps, payload, job) {
+    await syncComment(deps, String(payload.escalationId), Number(payload.eventId), job.attempts > 1);
+  },
+
+  async [JOB.notify](deps, payload) {
+    await sendNotification(deps, payload);
+  },
+
   async [JOB.staleSweep](deps) {
-    for (const id of deps.tickets.sweepStale(deps.now() - STALE_UPLOAD_MS)) enqueueRoute(deps, id);
+    for (const id of deps.tickets.sweepStale(deps.now() - STALE_UPLOAD_MS)) {
+      enqueueRoute(deps, id);
+      await removePartials(deps.config.dataDir, deps.tickets.attachments(id).map((a) => a.id));
+    }
+    const files = await sweepTempFiles(deps, STALE_UPLOAD_MS);
+    if (files) log.info('uploads', 'deleted abandoned upload files', { count: files });
   },
 
   async [JOB.retention](deps) {
+    const installs = deps.installs.purge(deps.now() - INSTALL_RETENTION_MS);
+    if (installs) log.info('retention', 'forgot installs not seen for 180 days', { count: installs });
     if (deps.config.retentionDays === 0 && !deps.db.prepare('SELECT 1 FROM projects WHERE retention_days > 0 LIMIT 1').get()) return;
     let total = 0;
     for (;;) {
       const ids = deps.tickets.expired(deps.config.retentionDays);
       if (ids.length === 0) break;
       for (const id of ids) {
-        for (const key of deps.tickets.delete(id)) await deps.blobs.delete(key).catch(() => undefined);
+        await deleteTicket(deps, id);
         total++;
       }
     }
     if (total) log.info('retention', 'deleted expired tickets', { count: total });
+  },
+
+  async [JOB.backup](deps) {
+    await runBackup(deps, backupTarget(deps), deps.config.backup.keep);
   },
 
   async [JOB.housekeeping](deps) {
@@ -103,8 +194,9 @@ const handlers: Record<string, Handler> = {
   },
 };
 
-/** What to do when a job fails: escalations record the error on the ticket. */
+/** What to do when a job fails: escalations record the error on the ticket, so do notifications that gave up. */
 function onFailure(deps: Deps, job: JobRow, error: string, dead: boolean): void {
+  if (job.kind === JOB.notify && dead) notificationFailed(deps, JSON.parse(job.payload_json) as Record<string, unknown>, error);
   if (job.kind !== JOB.escalate) return;
   const payload = JSON.parse(job.payload_json) as { escalationId?: string };
   const esc = payload.escalationId ? deps.integrations.escalation(payload.escalationId) : null;
@@ -157,6 +249,9 @@ export function scheduleRecurring(deps: Deps): void {
   deps.jobs.enqueue(JOB.staleSweep, {}, { dedupeKey: `${JOB.staleSweep}:${hour}`, maxAttempts: 3 });
   deps.jobs.enqueue(JOB.retention, {}, { dedupeKey: `${JOB.retention}:${day}`, maxAttempts: 3 });
   deps.jobs.enqueue(JOB.housekeeping, {}, { dedupeKey: `${JOB.housekeeping}:${day}`, maxAttempts: 3 });
+  // One backup per interval slot (slots are aligned to the epoch, so 24 h means just after midnight UTC).
+  const backupEvery = deps.config.backup.intervalHours * HOUR_MS;
+  if (backupEvery > 0) deps.jobs.enqueue(JOB.backup, {}, { dedupeKey: `${JOB.backup}:${Math.floor(t / backupEvery)}`, maxAttempts: 3 });
 }
 
 export interface Worker {

@@ -4,6 +4,8 @@
   SnitchInitProvider starts it before Application.onCreate.
   10.0.2.2 is the host machine as seen from the Android emulator. Cleartext
   HTTP to it is allowed only in debug builds (src/debug).
+  CAPTURE_NETWORK puts the app's HTTP requests in the report timeline (off by
+  default); MainActivity reports its one request with Snitch.recordNetwork.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
@@ -20,6 +22,9 @@
         <meta-data
             android:name="io.github.monjar.snitch.INGEST_KEY"
             android:value="snitch_pk_0123456789ABCDEFGHJKMNPQRS" />
+        <meta-data
+            android:name="io.github.monjar.snitch.CAPTURE_NETWORK"
+            android:value="true" />
 
         <activity
             android:name=".MainActivity"

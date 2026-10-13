@@ -6,6 +6,9 @@
  * - a text field (masked in screenshots and video by default)
  * - an animated colour band, so captured frames keep changing
  * - a Report button calling Snitch.show()
+ * - for the report timeline: the screen named with Snitch.setScreen, a
+ *   Snitch.log line, and one HTTP request (HttpURLConnection) reported with
+ *   Snitch.recordNetwork — OkHttp apps add SnitchOkHttpInterceptor instead
  * Plain framework Views; no AndroidX.
  */
 package io.github.monjar.snitch.example
@@ -27,6 +30,9 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import io.github.monjar.snitch.Snitch
+import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.URL
 
 class MainActivity : Activity() {
     /** Read by the instrumented tests on the main thread. */
@@ -77,6 +83,40 @@ class MainActivity : Activity() {
         root.addView(ScrollView(this).apply { addView(list) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         setContentView(root)
         updateLabels()
+
+        Snitch.setScreen("Example")
+        Snitch.log("example screen created")
+        checkServer()
+    }
+
+    /**
+     * One request for the timeline. Snitch never records requests to its own server
+     * (10.0.2.2:8080 here), so this goes to localhost:8080, which CI maps to the same
+     * host server with `adb reverse tcp:8080 tcp:8080`; without that mapping the
+     * request fails and is recorded with its error.
+     */
+    private fun checkServer() {
+        Thread({
+            val started = SystemClock.elapsedRealtime()
+            var status: Int? = null
+            var bytes: Long? = null
+            var error: String? = null
+            var conn: HttpURLConnection? = null
+            try {
+                conn = URL(HEALTH_URL).openConnection() as HttpURLConnection
+                conn.connectTimeout = 5_000
+                conn.readTimeout = 5_000
+                val code = conn.responseCode
+                status = code
+                bytes = (if (code >= 400) conn.errorStream else conn.inputStream)?.use { it.readBytes().size.toLong() }
+            } catch (e: IOException) {
+                error = "${e.javaClass.simpleName}: ${e.message}"
+            } finally {
+                conn?.disconnect()
+            }
+            val ms = (SystemClock.elapsedRealtime() - started).toDouble()
+            Snitch.recordNetwork("GET", HEALTH_URL, status, ms, null, bytes, error)
+        }, "example-health").start()
     }
 
     private fun onLongPress() {
@@ -95,6 +135,10 @@ class MainActivity : Activity() {
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density + 0.5f).toInt()
+
+    companion object {
+        const val HEALTH_URL = "http://localhost:8080/health"
+    }
 }
 
 /** A row with its own 600 ms long-press timer, so the test controls the timing exactly. */

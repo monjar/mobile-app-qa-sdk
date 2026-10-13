@@ -5,7 +5,10 @@
  * Parsing mirrors `mergeSdkConfig`: every field the server sent and that is
  * valid overrides the base (DEFAULT_SDK_CONFIG), nested objects merge by key,
  * and anything missing or out of range keeps the base value — a server one
- * version ahead never breaks the SDK. Pure Kotlin + org.json.
+ * version ahead never breaks the SDK, and a 0.2 server (or a cached 0.2
+ * response) without `timeline` / `crashPrompt` / `features` still parses.
+ * `features` is not merged: it describes the server that answered, so it is
+ * null when that server sent none. Pure Kotlin + org.json.
  */
 package io.github.monjar.snitch.config
 
@@ -24,6 +27,9 @@ internal data class VideoSettings(
     val mainThreadBudgetPct: Double,
 )
 
+/** Remote `timeline` switches; each only narrows what the app enabled at build time. */
+internal data class TimelineSettings(val console: Boolean, val network: Boolean, val screens: Boolean)
+
 internal data class SdkConfig(
     val enabled: Boolean,
     val ttlSeconds: Long,
@@ -33,7 +39,13 @@ internal data class SdkConfig(
     val maskTextInputs: Boolean,
     val screenshotPrompt: Boolean,
     val message: String?,
+    val timeline: TimelineSettings,
+    val crashPrompt: Boolean,
+    /** SERVER_FEATURES the answering server supports; null from servers before 0.3. */
+    val features: List<String>?,
 ) {
+    fun hasFeature(name: String): Boolean = features?.contains(name) == true
+
     companion object {
         /** contract/src/ingest.ts DEFAULT_SDK_CONFIG. */
         val DEFAULT = SdkConfig(
@@ -54,7 +66,16 @@ internal data class SdkConfig(
             maskTextInputs = true,
             screenshotPrompt = true,
             message = null,
+            timeline = TimelineSettings(console = true, network = true, screens = true),
+            crashPrompt = true,
+            features = null,
         )
+
+        /** SERVER_FEATURES entry: ReportCreate.trigger may be `crash`. */
+        const val FEATURE_TRIGGER_CRASH = "trigger-crash"
+
+        private const val MAX_FEATURES = 32
+        private const val MAX_FEATURE_CHARS = 40
 
         private val TYPE_ID = Regex("^[a-z0-9_-]{1,24}$")
         private val CAPTURE_MODES = setOf("snapshot", "system", "off")
@@ -90,6 +111,21 @@ internal data class SdkConfig(
                 json.isNull("message") -> null
                 else -> str(json, "message")?.take(500)?.ifBlank { null }
             }
+            val t = json.optJSONObject("timeline")
+            val bt = base.timeline
+            val timeline = if (t == null) {
+                bt
+            } else {
+                TimelineSettings(
+                    console = bool(t, "console") ?: bt.console,
+                    network = bool(t, "network") ?: bt.network,
+                    screens = bool(t, "screens") ?: bt.screens,
+                )
+            }
+            val features = json.optJSONArray("features")?.let { arr ->
+                (0 until arr.length()).mapNotNull { i -> (arr.opt(i) as? String)?.takeIf { it.isNotEmpty() && it.length <= MAX_FEATURE_CHARS } }
+                    .take(MAX_FEATURES)
+            }
             return SdkConfig(
                 enabled = bool(json, "enabled") ?: base.enabled,
                 ttlSeconds = num(json, "ttlSeconds", 60.0, 86_400.0)?.toLong() ?: base.ttlSeconds,
@@ -99,6 +135,9 @@ internal data class SdkConfig(
                 maskTextInputs = bool(json, "maskTextInputs") ?: base.maskTextInputs,
                 screenshotPrompt = bool(json, "screenshotPrompt") ?: base.screenshotPrompt,
                 message = message,
+                timeline = timeline,
+                crashPrompt = bool(json, "crashPrompt") ?: base.crashPrompt,
+                features = features,
             )
         }
 

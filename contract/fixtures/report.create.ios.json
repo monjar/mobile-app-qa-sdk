@@ -26,6 +26,8 @@
   },
   "sdk": { "name": "snitch-ios", "version": "0.1.0", "wrapper": "react-native", "wrapperVersion": "0.1.0" },
   "custom": { "userTier": "beta" },
+  "screen": "index",
+  "installId": "3d8e6c1a-2b4f-4e5d-8a9b-0c1d2e3f4a5b",
   "stats": {
     "captureMode": "snapshot",
     "snapshotRenderer": "drawHierarchy",
@@ -41,6 +43,7 @@
   },
   "attachments": [
     { "name": "screenshot", "contentType": "image/jpeg", "sizeBytes": 412833, "sha256": "9f2c1d0e4b7a6f5e3d2c1b0a9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e", "width": 1179, "height": 2556 },
-    { "name": "video", "contentType": "video/mp4", "sizeBytes": 1288211, "sha256": "0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7", "width": 393, "height": 852, "durationMs": 15000 }
+    { "name": "video", "contentType": "video/mp4", "sizeBytes": 1288211, "sha256": "0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7", "width": 393, "height": 852, "durationMs": 15000 },
+    { "name": "timeline", "contentType": "application/x-ndjson", "sizeBytes": 18211, "sha256": "5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b" }
   ]
 }

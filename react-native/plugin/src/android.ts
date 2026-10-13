@@ -20,6 +20,11 @@ export const META_DATA = {
   videoMaxSeconds: `${NS}.VIDEO_MAX_SECONDS`,
   showTesterNotice: `${NS}.SHOW_TESTER_NOTICE`,
   releaseType: `${NS}.RELEASE_TYPE`,
+  captureConsole: `${NS}.CAPTURE_CONSOLE`,
+  captureNetwork: `${NS}.CAPTURE_NETWORK`,
+  trackScreens: `${NS}.TRACK_SCREENS`,
+  crashPrompt: `${NS}.CRASH_PROMPT`,
+  checkInWhenInactive: `${NS}.CHECKIN_WHEN_INACTIVE`,
 } as const;
 
 /**
@@ -54,6 +59,12 @@ export function buildMetaData(options: SnitchResolvedOptions): [name: string, va
   put(META_DATA.videoMaxSeconds, options.videoMaxSeconds);
   put(META_DATA.showTesterNotice, options.showTesterNotice);
   put(META_DATA.releaseType, options.android.releaseType);
+  put(META_DATA.captureConsole, options.captureConsole);
+  // Also read by the React Native module's init provider: it adds Snitch's interceptor to React Native's OkHttp client.
+  put(META_DATA.captureNetwork, options.captureNetwork);
+  put(META_DATA.trackScreens, options.trackScreens);
+  put(META_DATA.crashPrompt, options.crashPrompt);
+  put(META_DATA.checkInWhenInactive, options.checkInWhenInactive);
   return entries;
 }
 

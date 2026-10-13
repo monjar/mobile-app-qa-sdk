@@ -63,6 +63,19 @@ export interface SnitchPluginProps {
   videoMaxSeconds?: number;
   /** One-time "this is a test build" notice. Default true. */
   showTesterNotice?: boolean;
+  /** Console lines in the report timeline: the JavaScript console, plus os_log (iOS) / logcat (Android). Default true. */
+  captureConsole?: boolean;
+  /**
+   * Request summaries in the report timeline (method, URL without query values, status, timing, sizes;
+   * never headers or bodies). Covers React Native's fetch / XMLHttpRequest. Default false.
+   */
+  captureNetwork?: boolean;
+  /** Screen changes in the report timeline (inferred natively until the app calls Snitch.setScreen). Default true. */
+  trackScreens?: boolean;
+  /** After an unexpected exit, offer to report it with the crash diagnostic. Default true. */
+  crashPrompt?: boolean;
+  /** When the release type can't be detected ("unknown"), send one diagnostic check-in per launch. Default false. */
+  checkInWhenInactive?: boolean;
   android?: {
     /** Force the release type instead of detecting it (meta-data RELEASE_TYPE). */
     releaseType?: ReleaseType;
@@ -89,6 +102,11 @@ export interface SnitchResolvedOptions {
   captureMode?: CaptureMode;
   videoMaxSeconds?: number;
   showTesterNotice?: boolean;
+  captureConsole?: boolean;
+  captureNetwork?: boolean;
+  trackScreens?: boolean;
+  crashPrompt?: boolean;
+  checkInWhenInactive?: boolean;
   android: {
     releaseType?: ReleaseType;
     detectScreenshots: boolean;
@@ -111,6 +129,11 @@ const TOP_LEVEL_KEYS = [
   'edgeHandleSide',
   'edgeHandlePosition',
   'edgeHandleColor',
+  'captureConsole',
+  'captureNetwork',
+  'trackScreens',
+  'crashPrompt',
+  'checkInWhenInactive',
   'android',
 ] as const;
 const ANDROID_KEYS = ['releaseType', 'detectScreenshots'] as const;
@@ -347,6 +370,12 @@ function parse(input: unknown, env: Env, requireConnection: boolean): ParseResul
       options.edgeHandleColor = color.startsWith('#') ? color : `#${color}`;
     }
   }
+
+  options.captureConsole = readBoolean(input, 'captureConsole', '', problems);
+  options.captureNetwork = readBoolean(input, 'captureNetwork', '', problems);
+  options.trackScreens = readBoolean(input, 'trackScreens', '', problems);
+  options.crashPrompt = readBoolean(input, 'crashPrompt', '', problems);
+  options.checkInWhenInactive = readBoolean(input, 'checkInWhenInactive', '', problems);
 
   const android = input.android;
   if (android !== undefined) {

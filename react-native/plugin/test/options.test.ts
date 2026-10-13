@@ -38,6 +38,11 @@ describe('validateOptions', () => {
         captureMode: 'system',
         videoMaxSeconds: 12,
         showTesterNotice: false,
+        captureConsole: false,
+        captureNetwork: true,
+        trackScreens: false,
+        crashPrompt: false,
+        checkInWhenInactive: true,
         android: { releaseType: 'internal', detectScreenshots: true },
       },
       NO_ENV,
@@ -53,6 +58,11 @@ describe('validateOptions', () => {
       captureMode: 'system',
       videoMaxSeconds: 12,
       showTesterNotice: false,
+      captureConsole: false,
+      captureNetwork: true,
+      trackScreens: false,
+      crashPrompt: false,
+      checkInWhenInactive: true,
       android: { releaseType: 'internal', detectScreenshots: true },
     });
   });
@@ -182,6 +192,44 @@ describe('validateOptions', () => {
       'enabled must be true or false (got "false").',
       'maskTextInputs must be true or false (got 1).',
     ]);
+  });
+
+  describe('timeline and crash options', () => {
+    it('leaves them out when unset, so the native defaults apply', () => {
+      const options = validateOptions(base, NO_ENV);
+      for (const key of ['captureConsole', 'captureNetwork', 'trackScreens', 'crashPrompt', 'checkInWhenInactive']) {
+        expect(options).not.toHaveProperty(key);
+      }
+    });
+
+    it.each([true, false])('keeps an explicit %s', (value) => {
+      expect(
+        validateOptions(
+          { ...base, captureConsole: value, captureNetwork: value, trackScreens: value, crashPrompt: value, checkInWhenInactive: value },
+          NO_ENV,
+        ),
+      ).toMatchObject({ captureConsole: value, captureNetwork: value, trackScreens: value, crashPrompt: value, checkInWhenInactive: value });
+    });
+
+    it('requires real booleans', () => {
+      expect(
+        problemsOf({ ...base, captureConsole: 'true', captureNetwork: 1, trackScreens: null, crashPrompt: 'no', checkInWhenInactive: [] }),
+      ).toEqual([
+        'captureConsole must be true or false (got "true").',
+        'captureNetwork must be true or false (got 1).',
+        'trackScreens must be true or false (got null).',
+        'crashPrompt must be true or false (got "no").',
+        'checkInWhenInactive must be true or false (got []).',
+      ]);
+    });
+
+    it('suggests the right spelling', () => {
+      expect(problemsOf({ ...base, captureNetworks: true })[0]).toBe('unknown option "captureNetworks". Did you mean "captureNetwork"?');
+      expect(problemsOf({ ...base, trackScreen: true })[0]).toBe('unknown option "trackScreen". Did you mean "trackScreens"?');
+      expect(problemsOf({ ...base, checkinWhenInactive: true })[0]).toBe(
+        'unknown option "checkinWhenInactive". Did you mean "checkInWhenInactive"?',
+      );
+    });
   });
 
   it('rejects unknown keys and suggests the right spelling', () => {

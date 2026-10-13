@@ -21,18 +21,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v5
       - name: Run logic-jvm tests
         working-directory: android
         run: ./gradlew -p logic-jvm test --no-daemon --stacktrace
       - name: Upload test report
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: logic-jvm-test-report
           path: android/logic-jvm/build/reports/tests/test
@@ -43,12 +43,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v5
       - name: Unit tests and release AARs
         working-directory: android
         run: >-
@@ -57,11 +57,28 @@ jobs:
           :snitch:assembleRelease
           :snitch-system-capture:assembleRelease
           :example:assembleDebug
-      - name: Publish to Maven local (what JitPack runs)
-        working-directory: android
-        run: ./gradlew --no-daemon :snitch:publishToMavenLocal :snitch-system-capture:publishToMavenLocal
+      - name: Publish to Maven local exactly as JitPack does
+        # jitpack.yml's install command with the environment JitPack sets, then
+        # check the coordinates apps resolve: com.github.monjar.mobile-app-qa-sdk:<module>:<tag>,
+        # and that snitch-system-capture's POM depends on the snitch artifact next to it.
+        env:
+          JITPACK: "true"
+          GROUP: com.github.monjar
+          ARTIFACT: mobile-app-qa-sdk
+          VERSION: ci-${{ github.sha }}
+        run: |
+          ./android/gradlew -p android --no-daemon :snitch:publishToMavenLocal :snitch-system-capture:publishToMavenLocal
+          repo="$HOME/.m2/repository/com/github/monjar/mobile-app-qa-sdk"
+          for m in snitch snitch-system-capture; do
+            ls "$repo/$m/$VERSION/$m-$VERSION.aar" "$repo/$m/$VERSION/$m-$VERSION.pom"
+          done
+          pom="$repo/snitch-system-capture/$VERSION/snitch-system-capture-$VERSION.pom"
+          grep -q "<groupId>com.github.monjar.mobile-app-qa-sdk</groupId>" "$pom"
+          grep -A2 "<artifactId>snitch</artifactId>" "$pom" | grep -q "<version>$VERSION</version>"
+          # OkHttp is compileOnly: it must not leak into the published dependencies.
+          ! grep -q okhttp "$repo/snitch/$VERSION/snitch-$VERSION.pom"
       - name: Upload AARs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: snitch-android-aars
           path: |
@@ -70,7 +87,7 @@ jobs:
           if-no-files-found: error
       - name: Upload unit test report
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: snitch-unit-test-report
           path: android/snitch/build/reports/tests
@@ -81,21 +98,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '24'
           cache: npm
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v5
       - name: Start the Snitch server
         run: bash scripts/ci-start-server.sh
       - name: Build the example and its tests
@@ -112,17 +129,32 @@ jobs:
           working-directory: android
           script: |
             adb logcat -c
+            adb reverse tcp:8080 tcp:8080
             ./gradlew --no-daemon :example:connectedDebugAndroidTest || (adb logcat -d > "$RUNNER_TEMP/logcat.txt"; exit 1)
             adb logcat -d > "$RUNNER_TEMP/logcat.txt"
       - name: Wait for the auto-report on the server
-        run: node scripts/ci-await-report.mjs --server http://127.0.0.1:8080 --description autoreport --out "$RUNNER_TEMP/report" --timeout 300
+        # The example logs, names its screen and requests localhost:8080/health (through adb reverse;
+        # the SDK's own 10.0.2.2 host is never recorded) before the auto-report, whose clip and
+        # timeline go up in 64 KiB chunks (ci-start-server.sh).
+        run: >-
+          node scripts/ci-await-report.mjs --server http://127.0.0.1:8080 --description autoreport --out "$RUNNER_TEMP/report" --timeout 300
+          --expect-timeline app,touch,log,net,screen --expect-log "autoreport test starting"
+          --expect-net "localhost:8080/health" --expect-screen Example --expect-checkin android
       - name: Verify the video
         run: |
           command -v ffprobe >/dev/null || { sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg; }
           bash scripts/verify-video.sh "$RUNNER_TEMP/report/video.mp4"
+      - name: Show what went wrong
+        if: failure()
+        run: |
+          find android/example/build/outputs/androidTest-results -name '*.xml' -exec grep -A12 "<failure" {} + | head -80 || true
+          if [ -f "$RUNNER_TEMP/logcat.txt" ]; then
+            grep -E " [EF] |FATAL|ANR in|Snitch|TestRunner" "$RUNNER_TEMP/logcat.txt" | tail -150
+          fi
+          tail -40 "$RUNNER_TEMP/snitch-server.log" || true
       - name: Upload report, logs and test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: android-e2e
           path: |

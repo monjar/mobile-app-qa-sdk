@@ -1,0 +1,12 @@
+{
+  "reportId": "01JA2Z8Y6Q3K4M5N6P7R8S9T0V",
+  "ticket": "MOCH-42",
+  "number": 42,
+  "state": "pending",
+  "attachments": [
+    { "name": "screenshot", "state": "stored" },
+    { "name": "video", "state": "missing", "receivedBytes": 1048576 },
+    { "name": "timeline", "state": "missing", "receivedBytes": 0 }
+  ],
+  "upload": { "resumable": true, "chunkBytes": 1048576 }
+}

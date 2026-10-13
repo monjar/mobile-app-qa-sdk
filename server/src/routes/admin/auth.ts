@@ -1,5 +1,5 @@
 /**
- * Login, logout, current user, and first-run setup.
+ * Login (password, or GitHub in githubLogin.ts), logout, current user, and first-run setup.
  *
  * First run: with no users and no SNITCH_BOOTSTRAP_ADMIN_* env, the server
  * logs a one-time setup URL; whoever opens it creates the first admin. The
@@ -8,15 +8,16 @@
 import { Hono } from 'hono';
 import { getCookie } from 'hono/cookie';
 import { z } from 'zod';
-import { LoginRequest, PASSWORD_MIN_LENGTH, type Me } from '@snitch/contract';
+import { LoginRequest, PASSWORD_MIN_LENGTH, type AuthProviders, type Me } from '@snitch/contract';
 import type { Deps } from '../../deps';
 import type { AppEnv } from '../../http/env';
 import { HttpError, unauthorized } from '../../http/errors';
 import { jsonBody } from '../../http/validate';
-import { clearSessionCookie, cookieName, requireSession, setSessionCookie } from '../../http/session';
+import { clearSessionCookie, cookieName, requireSession, setSessionCookie, startSession } from '../../http/session';
 import { DUMMY_HASH, verifyPassword } from '../../crypto/passwords';
 import { safeEqual } from '../../crypto/tokens';
 import { toUserView } from '../../repo/users';
+import { githubLoginRoutes } from './githubLogin';
 
 const SetupRequest = z.object({
   token: z.string().min(1).max(200),
@@ -27,6 +28,9 @@ const SetupRequest = z.object({
 
 export function authRoutes(deps: Deps): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
+
+  app.get('/providers', (c) => c.json({ password: true, github: deps.config.githubAuth !== null } satisfies AuthProviders));
+  app.route('/github', githubLoginRoutes(deps));
 
   app.get('/setup', (c) => c.json({ needed: deps.setupToken.value !== null && deps.users.count() === 0 }));
 
@@ -57,11 +61,7 @@ export function authRoutes(deps: Deps): Hono<AppEnv> {
       throw new HttpError(401, 'unauthorized', 'Email or password is incorrect');
     }
     deps.limiters.loginPerEmail.reset(email);
-    deps.users.recordLogin(user.id);
-    const s = deps.sessions.create(user.id, c.get('ip'), c.req.header('user-agent') ?? null);
-    setSessionCookie(c, deps, s.token, s.expiresAt);
-    deps.audit.add(user.id, 'login', user.email, {}, c.get('ip'));
-    return c.json({ user: toUserView({ ...user, last_login_at: deps.now() }), csrfToken: s.csrfToken } satisfies Me);
+    return c.json(startSession(c, deps, user, 'login') satisfies Me);
   });
 
   app.post('/logout', requireSession(deps), (c) => {

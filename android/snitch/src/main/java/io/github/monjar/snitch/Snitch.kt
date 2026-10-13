@@ -1,10 +1,10 @@
 /*
- * Public API of the Snitch Android SDK (spec §8.2).
+ * Public API of the Snitch Android SDK (spec §8.2, §11.9).
  *
  * `Snitch` is a thin, thread-safe facade: state that may be set before start()
- * (user, metadata, logs, masks, wrapper) lives in SnitchState, and everything
- * else is delegated to the SnitchRuntime created by start(). Every method may
- * be called from any thread; UI work hops to the main thread internally.
+ * (user, metadata, logs, masks, wrapper, the timeline) lives in SnitchState, and
+ * everything else is delegated to the SnitchRuntime created by start(). Every
+ * method may be called from any thread; UI work hops to the main thread internally.
  *
  * Autostart: SnitchInitProvider calls start(context) when the manifest has the
  * SERVER_URL meta-data, so most apps never call start() themselves.
@@ -18,6 +18,7 @@ import android.os.Looper
 import android.view.View
 import io.github.monjar.snitch.config.ManifestConfigReader
 import io.github.monjar.snitch.config.StartConfig
+import io.github.monjar.snitch.network.NetworkCapture
 
 /** How the running build was distributed (wire values from contract/src/enums.ts). */
 enum class SnitchReleaseType(val wireValue: String) {
@@ -44,7 +45,22 @@ enum class SnitchReleaseType(val wireValue: String) {
     }
 }
 
-enum class SnitchLogLevel { DEBUG, INFO, WARN, ERROR }
+enum class SnitchLogLevel {
+    DEBUG,
+    INFO,
+    WARN,
+    ERROR,
+    ;
+
+    /** The timeline's level name (contract LOG_LEVELS). */
+    internal val wireValue: String
+        get() = when (this) {
+            DEBUG -> "debug"
+            INFO -> "info"
+            WARN -> "warn"
+            ERROR -> "error"
+        }
+}
 
 /** What opens the report sheet. */
 enum class SnitchGesture(val wireValue: String) {
@@ -84,13 +100,24 @@ data class SnitchOptions @JvmOverloads constructor(
     /** Longest clip offered, 1–30 s. */
     val videoMaxSeconds: Int = 30,
     val showTesterNotice: Boolean = true,
+    /** Console lines (Snitch.log, logcat of this process) in the report timeline. */
+    val captureConsole: Boolean = true,
+    /** HTTP requests in the timeline: SnitchOkHttpInterceptor and Snitch.recordNetwork record nothing without it. */
+    val captureNetwork: Boolean = false,
+    /** Screen changes (resumed activities, or names from Snitch.setScreen) in the timeline. */
+    val trackScreens: Boolean = true,
+    /** After an unexpected exit (crash, ANR), offer to report it on the next launch. */
+    val crashPrompt: Boolean = true,
+    /** When the release type is `unknown`, send one diagnostic check-in per launch (nothing else). */
+    val checkInWhenInactive: Boolean = false,
 ) {
     companion object {
         /**
          * Builds options from lowerCamelCase keys mirroring spec §2.1 (`enabledReleaseTypes`,
          * `gesture`, `screenshotPrompt`, `maskTextInputs`, `captureMode`, `videoMaxSeconds`,
-         * `showTesterNotice`). Unknown keys and invalid values are ignored. Used by the
-         * React Native bridge.
+         * `showTesterNotice`, `captureConsole`, `captureNetwork`, `trackScreens`,
+         * `crashPrompt`, `checkInWhenInactive`). Unknown keys and invalid values are
+         * ignored. Used by the React Native bridge.
          */
         @JvmStatic
         fun fromMap(map: Map<String, Any?>): SnitchOptions {
@@ -108,6 +135,11 @@ data class SnitchOptions @JvmOverloads constructor(
                 captureMode = SnitchCaptureMode.fromWire(map["captureMode"]?.toString()) ?: d.captureMode,
                 videoMaxSeconds = (map["videoMaxSeconds"] as? Number)?.toInt()?.coerceIn(1, 30) ?: d.videoMaxSeconds,
                 showTesterNotice = (map["showTesterNotice"] as? Boolean) ?: d.showTesterNotice,
+                captureConsole = (map["captureConsole"] as? Boolean) ?: d.captureConsole,
+                captureNetwork = (map["captureNetwork"] as? Boolean) ?: d.captureNetwork,
+                trackScreens = (map["trackScreens"] as? Boolean) ?: d.trackScreens,
+                crashPrompt = (map["crashPrompt"] as? Boolean) ?: d.crashPrompt,
+                checkInWhenInactive = (map["checkInWhenInactive"] as? Boolean) ?: d.checkInWhenInactive,
             )
         }
     }
@@ -119,7 +151,8 @@ data class SnitchOptions @JvmOverloads constructor(
  * Set them in code with [Snitch.debugOverrides] (instrumented tests: call it
  * from the test after the activity launched), or with meta-data
  * `io.github.monjar.snitch.DEBUG_SERVER_URL`, `DEBUG_INGEST_KEY`,
- * `DEBUG_AUTOREPORT` (seconds), `DEBUG_CANCEL_AFTER_MS`, `DEBUG_SHOW_ON_LAUNCH`.
+ * `DEBUG_AUTOREPORT` (seconds), `DEBUG_CANCEL_AFTER_MS`, `DEBUG_SHOW_ON_LAUNCH`,
+ * `DEBUG_CHUNK_BYTES`.
  */
 data class SnitchDebugOverrides @JvmOverloads constructor(
     val serverUrl: String? = null,
@@ -130,6 +163,8 @@ data class SnitchDebugOverrides @JvmOverloads constructor(
     val cancelAfterMs: Long? = null,
     /** Open the sheet 2 s after the overrides apply. */
     val showOnLaunch: Boolean = false,
+    /** SNITCH_DEBUG_CHUNK_BYTES: caps the resumable-upload chunk size (never below the contract's 64 KiB). */
+    val chunkBytes: Int? = null,
 )
 
 object Snitch {
@@ -217,11 +252,47 @@ object Snitch {
         SnitchState.setMetadata(key, value)
     }
 
-    /** Appends a line to the in-memory log ring sent as the `logs` attachment. */
+    /**
+     * Appends a line to the in-memory log ring sent as the `logs` attachment, and to
+     * the report timeline (source `app`) while console capture is on.
+     */
     @JvmStatic
     @JvmOverloads
     fun log(message: String, level: SnitchLogLevel = SnitchLogLevel.INFO) {
         SnitchState.logs.append(System.currentTimeMillis(), level, message)
+        SnitchState.timeline.log(level.wireValue, "app", message)
+    }
+
+    /**
+     * Names the screen showing now, for the report timeline and the report's `screen`
+     * (source `app`); null means no named screen. Once called, Snitch stops inferring
+     * screens from activities for the rest of the process. Needs `trackScreens`.
+     */
+    @JvmStatic
+    fun setScreen(name: String?) {
+        SnitchState.setAppScreen(name)
+    }
+
+    /**
+     * Records a finished HTTP request made with a client other than OkHttp (use
+     * [io.github.monjar.snitch.network.SnitchOkHttpInterceptor] for OkHttp). Call it
+     * when the response ended or the request failed; [durationMs] is from start to
+     * that moment and dates the event. The URL is stored sanitized (no credentials,
+     * fragment or query values); headers and bodies are never recorded. Ignored
+     * unless Snitch is active with `captureNetwork` on, and for requests to the
+     * Snitch server itself.
+     */
+    @JvmStatic
+    fun recordNetwork(
+        method: String,
+        url: String,
+        status: Int?,
+        durationMs: Double?,
+        requestBytes: Long?,
+        responseBytes: Long?,
+        error: String?,
+    ) {
+        NetworkCapture.recordFinished(method, url, status, durationMs, requestBytes, responseBytes, error)
     }
 
     /** Extra log text (e.g. the app's own logs) appended to the `logs` attachment at send time. */

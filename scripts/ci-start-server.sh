@@ -13,6 +13,8 @@ export SNITCH_LOG="${SNITCH_LOG:-${RUNNER_TEMP:-/tmp}/snitch-server.log}"
 export PORT="${PORT:-8080}"
 # CI devices all share one address; don't let the per-IP limits get in the way.
 export SNITCH_REPORTS_PER_IP_PER_10_MIN=1000
+# Small chunks so the SDKs upload any clip over 64 KiB in several resumable parts.
+export SNITCH_UPLOAD_CHUNK_BYTES="${SNITCH_UPLOAD_CHUNK_BYTES:-65536}"
 
 cd "$ROOT"
 if [ ! -d node_modules ]; then npm ci --no-audit --no-fund; fi

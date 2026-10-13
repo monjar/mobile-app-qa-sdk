@@ -5,6 +5,7 @@
  *   /health, /health/ready   liveness / readiness
  *   /api/v1/*                SDK: config, reports, attachments (ingest key)
  *   /api/admin/*             dashboard API (session cookie + CSRF)
+ *   /api/hooks/*             signed inbound webhooks (GitHub issue sync)
  *   /s/:token                public share links
  *   everything else          the dashboard SPA
  */
@@ -18,6 +19,7 @@ import { securityHeaders } from './http/securityHeaders';
 import { requireSession } from './http/session';
 import { errorMessage, log } from './log';
 import { ingestRoutes } from './routes/ingest';
+import { hookRoutes } from './routes/hooks';
 import { authRoutes } from './routes/admin/auth';
 import { ticketRoutes } from './routes/admin/tickets';
 import { projectRoutes } from './routes/admin/projects';
@@ -36,9 +38,11 @@ export function buildApp(deps: Deps): Hono<AppEnv> {
     await next();
   });
   app.use('*', securityHeaders({ hsts: deps.config.publicUrl.startsWith('https://') }));
-  // JSON bodies are small; attachment PUTs are streamed and capped per type in the route.
+  // JSON bodies are small; attachment PUTs are streamed and capped per type in the route,
+  // and webhooks set their own (larger) limit.
   app.use('*', async (c, next) => {
     if (c.req.method === 'PUT' && /^\/api\/v1\/reports\/[^/]+\/attachments\//.test(c.req.path)) return next();
+    if (c.req.path.startsWith('/api/hooks/')) return next();
     return bodyLimit({ maxSize: JSON_LIMIT, onError: (c) => c.json(errorBody('payload_too_large', 'Request body too large'), 413) })(c, next);
   });
 
@@ -54,6 +58,7 @@ export function buildApp(deps: Deps): Hono<AppEnv> {
   });
 
   app.route('/api/v1', ingestRoutes(deps));
+  app.route('/api/hooks', hookRoutes(deps));
 
   const admin = new Hono<AppEnv>();
   admin.route('/auth', authRoutes(deps));

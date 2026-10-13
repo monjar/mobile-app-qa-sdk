@@ -6,6 +6,24 @@
  *   2. PUT  /api/v1/reports/:id/attachments/:name   — raw bytes per declared attachment
  *   3. POST /api/v1/reports/:id/complete            — 409 until every declared attachment is stored
  * A report the client never completes is swept after 24 h and marked `incomplete`.
+ *
+ * Chunked (resumable) attachment upload, for servers listing `resumable-upload`
+ * in the config's `features` and answering step 1 with `upload.resumable`:
+ *   PUT …/attachments/:name with `Content-Range: bytes <start>-<end>/<total>`
+ *   (end inclusive, total = declared size), `Content-Length` = end − start + 1,
+ *   `X-Content-SHA256` = the WHOLE file's declared hash, and optionally
+ *   `X-Chunk-SHA256` = this chunk's hash.
+ *   - 202 AttachmentPartial  — chunk appended; `receivedBytes` is the new offset
+ *   - 201 AttachmentStored   — the last chunk arrived and the whole file verified
+ *   - 409 range_mismatch     — `start` is not the server's offset; resume from
+ *                              `details.receivedBytes`
+ *   - 422 hash_mismatch      — with `details.chunk: true` the chunk was rejected and
+ *                              nothing was appended; without it the assembled file
+ *                              failed verification and the server discarded it
+ *                              (start again from 0)
+ * Step 1 reports each missing attachment's `receivedBytes`, so a client that lost
+ * its offset resumes without re-sending. A PUT without Content-Range still sends
+ * the whole file and replaces any partial upload.
  */
 import { z } from 'zod';
 import {
@@ -13,6 +31,7 @@ import {
   ATTACHMENT_LIMITS,
   ATTACHMENT_NAME,
   CaptureMode,
+  MAX_ATTACHMENTS,
   MAX_VIDEO_SECONDS,
   Platform,
   ReleaseType,
@@ -28,6 +47,7 @@ export const HEADERS = {
   ingestKey: 'x-snitch-key',
   sdk: 'x-snitch-sdk',
   contentSha256: 'x-content-sha256',
+  chunkSha256: 'x-chunk-sha256',
   signature: 'x-snitch-signature',
   timestamp: 'x-snitch-timestamp',
   event: 'x-snitch-event',
@@ -66,6 +86,20 @@ export const VideoConfig = z.object({
 });
 export type VideoConfig = z.infer<typeof VideoConfig>;
 
+/**
+ * What the report timeline records. Each switch only narrows what the app enabled
+ * at build time (network capture in particular must be switched on in the app).
+ */
+export const TimelineConfig = z.object({
+  /** Console / log lines: the app's Snitch.log, React Native console, os_log or logcat. */
+  console: z.boolean(),
+  /** Method, sanitized URL, status and timing of recent HTTP requests. */
+  network: z.boolean(),
+  /** Screen changes (view controllers / activities, or names the app sets). */
+  screens: z.boolean(),
+});
+export type TimelineConfig = z.infer<typeof TimelineConfig>;
+
 export const SdkConfig = z.object({
   /** Off means: no gesture, no capture, no prompt. The SDK re-fetches after ttlSeconds. */
   enabled: z.boolean(),
@@ -78,6 +112,14 @@ export const SdkConfig = z.object({
   screenshotPrompt: z.boolean(),
   /** Optional one-line notice shown at the top of the report sheet. */
   message: z.string().max(500).nullable(),
+  timeline: TimelineConfig,
+  /** After an unexpected exit, offer to report it on the next launch. */
+  crashPrompt: z.boolean(),
+  /**
+   * What this server supports beyond the 0.1 protocol (SERVER_FEATURES). Set by the
+   * server on every response, never stored in overrides; absent from old servers.
+   */
+  features: z.array(z.string().max(40)).max(32).optional(),
 });
 export type SdkConfig = z.infer<typeof SdkConfig>;
 
@@ -103,6 +145,8 @@ export const DEFAULT_SDK_CONFIG: SdkConfig = {
   maskTextInputs: true,
   screenshotPrompt: true,
   message: null,
+  timeline: { console: true, network: true, screens: true },
+  crashPrompt: true,
 };
 
 /** What a project stores per platform × release type: any subset, merged over the defaults. */
@@ -116,19 +160,22 @@ export const SdkConfigOverride = z
     maskTextInputs: z.boolean(),
     screenshotPrompt: z.boolean(),
     message: SdkConfig.shape.message,
+    timeline: TimelineConfig.partial(),
+    crashPrompt: z.boolean(),
   })
   .partial();
 export type SdkConfigOverride = z.infer<typeof SdkConfigOverride>;
 
 /** Merge overrides left to right over a base config. Later wins; nested objects merge by key. */
 export function mergeSdkConfig(base: SdkConfig, ...overrides: SdkConfigOverride[]): SdkConfig {
-  let out: SdkConfig = { ...base, screenshot: { ...base.screenshot }, video: { ...base.video } };
+  let out: SdkConfig = { ...base, screenshot: { ...base.screenshot }, video: { ...base.video }, timeline: { ...base.timeline } };
   for (const o of overrides) {
     out = {
       ...out,
       ...stripUndefined(o),
       screenshot: { ...out.screenshot, ...stripUndefined(o.screenshot ?? {}) },
       video: { ...out.video, ...stripUndefined(o.video ?? {}) },
+      timeline: { ...out.timeline, ...stripUndefined(o.timeline ?? {}) },
     };
   }
   return out;
@@ -146,6 +193,24 @@ export const SdkConfigQuery = z.object({
   os: str(32).optional(),
   /** `crashloop` when the SDK suspects its capture crashed the app; the server may answer with capture off. */
   health: z.enum(['ok', 'crashloop']).optional(),
+
+  // Check-in fields (feature `checkin`). With `installId` present the server records
+  // the fetch on the project's Devices page; older servers ignore unknown parameters.
+  /** Random per-install id (UUID v4), not derived from any device identifier; reset on reinstall. */
+  installId: z.uuid().optional(),
+  appId: str(255).optional(),
+  sdkVersion: str(32).optional(),
+  /** `react-native` under the RN wrapper. */
+  wrapper: str(32).optional(),
+  /** Hardware model, e.g. iPhone15,2 / Pixel 8. */
+  model: str(64).optional(),
+  /** Release-type detection signals, `key=value` pairs joined by `;` (docs/sdk-spec.md §3.1). */
+  signals: str(300).optional(),
+  /**
+   * `1` when the SDK is running. `0` is the opt-in diagnostic ping an SDK sends once
+   * per launch when it could not decide the release type (`unknown`) and stayed inert.
+   */
+  active: z.enum(['0', '1']).optional(),
 });
 export type SdkConfigQuery = z.infer<typeof SdkConfigQuery>;
 
@@ -267,7 +332,11 @@ export const ReportCreate = z
       .refine((r) => Object.keys(r).length <= MAX_CUSTOM_KEYS, { message: `at most ${MAX_CUSTOM_KEYS} custom keys` })
       .optional(),
     stats: CaptureStats.optional(),
-    attachments: z.array(AttachmentDeclaration).max(5),
+    /** The screen showing when the sheet opened (last timeline screen, or the app's own name for it). */
+    screen: str(200).optional(),
+    /** The check-in installId, linking the report to its row on the Devices page. */
+    installId: z.uuid().optional(),
+    attachments: z.array(AttachmentDeclaration).max(MAX_ATTACHMENTS),
   })
   .refine((r) => new Set(r.attachments.map((a) => a.name)).size === r.attachments.length, {
     message: 'attachment names must be unique',
@@ -284,7 +353,22 @@ export const ReportCreated = z.object({
   ticket: z.string(),
   number: z.number().int().positive(),
   state: UploadState,
-  attachments: z.array(z.object({ name: z.string(), state: AttachmentState })),
+  attachments: z.array(
+    z.object({
+      name: z.string(),
+      state: AttachmentState,
+      /** Bytes of a chunked upload already on the server (missing attachments only). */
+      receivedBytes: z.number().int().nonnegative().optional(),
+    }),
+  ),
+  /** Present when the server takes chunked attachment uploads. */
+  upload: z
+    .object({
+      resumable: z.boolean(),
+      /** Preferred chunk size; clients send chunks of at most this many bytes. */
+      chunkBytes: z.number().int().positive(),
+    })
+    .optional(),
 });
 export type ReportCreated = z.infer<typeof ReportCreated>;
 
@@ -294,6 +378,35 @@ export const AttachmentStored = z.object({
   sizeBytes: z.number().int().nonnegative(),
 });
 export type AttachmentStored = z.infer<typeof AttachmentStored>;
+
+/** 202 answer to a chunk that is not the last one. */
+export const AttachmentPartial = z.object({
+  name: z.string(),
+  state: z.literal('partial'),
+  receivedBytes: z.number().int().nonnegative(),
+});
+export type AttachmentPartial = z.infer<typeof AttachmentPartial>;
+
+/** Smallest and largest chunk a server may ask for. */
+export const CHUNK_BYTES_MIN = 64 * 1024;
+export const CHUNK_BYTES_MAX = 8 * 1024 * 1024;
+export const CHUNK_BYTES_DEFAULT = 1024 * 1024;
+
+export interface ContentRange {
+  start: number;
+  /** Inclusive. */
+  end: number;
+  total: number;
+}
+
+/** Parses `bytes <start>-<end>/<total>`; null for anything else (including `*` forms). */
+export function parseContentRange(header: string | null | undefined): ContentRange | null {
+  const m = /^bytes (\d{1,12})-(\d{1,12})\/(\d{1,12})$/.exec((header ?? '').trim());
+  if (!m) return null;
+  const [start, end, total] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  if (end < start || end >= total) return null;
+  return { start, end, total };
+}
 
 export const ReportCompleted = z.object({
   reportId: z.string(),
@@ -319,6 +432,7 @@ export const ERROR_CODES = [
   'conflict',
   'attachments_missing',
   'report_completed',
+  'range_mismatch',
   'rate_limited',
   'csrf',
   'internal',
@@ -338,6 +452,6 @@ export type ApiError = z.infer<typeof ApiError>;
 /** Whether an SDK should keep a queued report and try again later after this error. */
 export function isRetryable(status: number, code?: ErrorCode): boolean {
   if (status === 429 || status >= 500 || status === 0) return true;
-  if (code === 'attachments_missing') return true;
+  if (code === 'attachments_missing' || code === 'range_mismatch') return true;
   return false;
 }

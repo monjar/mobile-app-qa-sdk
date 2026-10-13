@@ -12,13 +12,18 @@ import type { TurboModule } from 'react-native';
 import { TurboModuleRegistry } from 'react-native';
 
 export interface Spec extends TurboModule {
-  /** `options` keys: enabledReleaseTypes, gesture, screenshotPrompt, maskTextInputs, captureMode, videoMaxSeconds, showTesterNotice. */
+  /**
+   * `options` keys: enabledReleaseTypes, gesture, screenshotPrompt, maskTextInputs, captureMode, videoMaxSeconds,
+   * showTesterNotice, edgeHandleSide, edgeHandlePosition, edgeHandleColor, captureConsole, captureNetwork,
+   * trackScreens, crashPrompt, checkInWhenInactive.
+   */
   // eslint-disable-next-line @typescript-eslint/no-wrapper-object-types
   start(serverUrl: string, ingestKey: string, options: Object): void;
   show(type: string | null): void;
   setUser(userId: string | null, email: string | null, name: string | null): void;
   setMetadata(key: string, value: string | null): void;
   log(message: string, level: string): void;
+  setScreen(name: string | null): void;
   setEnabled(enabled: boolean): void;
   isEnabled(): boolean;
   getReleaseType(): string;

@@ -11,6 +11,8 @@ enum Theme {
     static let chipCornerRadius: CGFloat = 14
     static let toastDuration: TimeInterval = 2.5
     static let promptDuration: TimeInterval = 4
+    /// The crash follow-up pill stays longer: it asks about something that already happened.
+    static let crashPromptDuration: TimeInterval = 10
     static let pillHeight: CGFloat = 44
     static let shadowRadius: CGFloat = 12
 }

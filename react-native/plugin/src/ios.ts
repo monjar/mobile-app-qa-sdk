@@ -17,6 +17,11 @@ export interface SnitchInfoPlistDict {
   EdgeHandleSide?: string;
   EdgeHandlePosition?: number;
   EdgeHandleColor?: string;
+  CaptureConsole?: boolean;
+  CaptureNetwork?: boolean;
+  TrackScreens?: boolean;
+  CrashPrompt?: boolean;
+  CheckInWhenInactive?: boolean;
 }
 
 /** The `Snitch` dictionary for these options; keys the app didn't set are omitted. */
@@ -36,6 +41,12 @@ export function buildInfoPlistDict(options: SnitchResolvedOptions): SnitchInfoPl
   if (options.edgeHandleSide !== undefined) dict.EdgeHandleSide = options.edgeHandleSide;
   if (options.edgeHandlePosition !== undefined) dict.EdgeHandlePosition = options.edgeHandlePosition;
   if (options.edgeHandleColor !== undefined) dict.EdgeHandleColor = options.edgeHandleColor;
+  if (options.captureConsole !== undefined) dict.CaptureConsole = options.captureConsole;
+  // Also read by the React Native module at launch: it routes React Native's networking through Snitch.
+  if (options.captureNetwork !== undefined) dict.CaptureNetwork = options.captureNetwork;
+  if (options.trackScreens !== undefined) dict.TrackScreens = options.trackScreens;
+  if (options.crashPrompt !== undefined) dict.CrashPrompt = options.crashPrompt;
+  if (options.checkInWhenInactive !== undefined) dict.CheckInWhenInactive = options.checkInWhenInactive;
   return dict;
 }
 

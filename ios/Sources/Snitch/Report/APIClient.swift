@@ -96,14 +96,17 @@ final class APIClient {
         return req
     }
 
-    /// Sends `request`; with `file`, uploads that file as the body.
-    func send(_ request: URLRequest, file: URL? = nil, completion: @escaping (HTTPResponse) -> Void) {
+    /// Sends `request`; with `file`, uploads that file as the body; with `body`, uploads
+    /// those bytes (one chunk of a resumable upload).
+    func send(_ request: URLRequest, file: URL? = nil, body: Data? = nil, completion: @escaping (HTTPResponse) -> Void) {
         let handler: (Data?, URLResponse?, Error?) -> Void = { data, response, error in
             completion(APIClient.makeResponse(data: data, response: response, error: error))
         }
         let task: URLSessionTask
         if let file = file {
             task = session.uploadTask(with: request, fromFile: file, completionHandler: handler)
+        } else if let body = body {
+            task = session.uploadTask(with: request, from: body, completionHandler: handler)
         } else {
             task = session.dataTask(with: request, completionHandler: handler)
         }
@@ -111,11 +114,11 @@ final class APIClient {
     }
 
     /// Blocking variant for the uploader's serial background queue.
-    func sendSync(_ request: URLRequest, file: URL? = nil) -> HTTPResponse {
+    func sendSync(_ request: URLRequest, file: URL? = nil, body: Data? = nil) -> HTTPResponse {
         precondition(!Thread.isMainThread, "sendSync must not block the main thread")
         let semaphore = DispatchSemaphore(value: 0)
         let box = Locked(HTTPResponse(status: 0, data: Data(), headers: [:], errorCode: nil, transportError: nil))
-        send(request, file: file) { response in
+        send(request, file: file, body: body) { response in
             box.set(response)
             semaphore.signal()
         }
@@ -156,16 +159,36 @@ enum APIErrorEnvelope {
             init(from decoder: Decoder) throws {
                 let c = try decoder.container(keyedBy: CodingKeys.self)
                 code = try c.decode(String.self, forKey: .code)
-                // `details` is free-form; only the attachments_missing shape matters here.
+                // `details` is free-form; only the shapes the uploader acts on are read.
                 details = try? c.decodeIfPresent(Details.self, forKey: .details)
             }
         }
 
         struct Details: Decodable {
+            /// attachments_missing
             var missing: [String]?
+            /// range_mismatch: the server's offset for the attachment
+            var receivedBytes: Int?
+            /// hash_mismatch: true when only the chunk was rejected (nothing appended)
+            var chunk: Bool?
+
+            private enum CodingKeys: String, CodingKey {
+                case missing, receivedBytes, chunk
+            }
+
+            init(from decoder: Decoder) throws {
+                let c = try decoder.container(keyedBy: CodingKeys.self)
+                missing = try? c.decodeIfPresent([String].self, forKey: .missing)
+                receivedBytes = try? c.decodeIfPresent(Int.self, forKey: .receivedBytes)
+                chunk = try? c.decodeIfPresent(Bool.self, forKey: .chunk)
+            }
         }
 
         var error: Inner
+    }
+
+    private static func details(from data: Data) -> Envelope.Details? {
+        (try? JSONDecoder().decode(Envelope.self, from: data))?.error.details
     }
 
     static func code(from data: Data) -> String? {
@@ -174,13 +197,23 @@ enum APIErrorEnvelope {
 
     /// `details.missing` of an `attachments_missing` error.
     static func missingAttachments(from data: Data) -> [String]? {
-        (try? JSONDecoder().decode(Envelope.self, from: data))?.error.details?.missing
+        details(from: data)?.missing
+    }
+
+    /// `details.receivedBytes` of a `range_mismatch` error.
+    static func receivedBytes(from data: Data) -> Int? {
+        details(from: data)?.receivedBytes
+    }
+
+    /// `details.chunk` of a `hash_mismatch` error: only that chunk was rejected.
+    static func isChunkHashMismatch(_ data: Data) -> Bool {
+        details(from: data)?.chunk == true
     }
 
     /// Mirror of `isRetryable` in contract/src/ingest.ts.
     static func isRetryable(status: Int, code: String?) -> Bool {
         if status == 429 || status >= 500 || status == 0 { return true }
-        if code == "attachments_missing" { return true }
+        if code == "attachments_missing" || code == "range_mismatch" { return true }
         return false
     }
 }

@@ -1,7 +1,7 @@
 /** Query keys and shared queries, so pages invalidate each other consistently. */
 import { useQuery } from '@tanstack/react-query';
-import type { IntegrationView, ProjectView, ServerInfo, UserView } from '@snitch/contract';
-import { get } from './api';
+import type { AttachmentView, IntegrationView, ProjectView, ServerInfo, UserView } from '@snitch/contract';
+import { fetchText, get } from './api';
 
 export const qk = {
   projects: ['projects'] as const,
@@ -13,6 +13,9 @@ export const qk = {
   keys: (projectId: string) => ['keys', projectId] as const,
   routing: (projectId: string) => ['routing', projectId] as const,
   sdkConfig: (projectId: string) => ['sdk-config', projectId] as const,
+  devices: (projectId: string, params: string) => ['devices', projectId, params] as const,
+  attachmentText: (attachmentId: string) => ['attachment-text', attachmentId] as const,
+  authProviders: ['auth-providers'] as const,
   jobs: (state: string) => ['jobs', state] as const,
   audit: ['audit'] as const,
 };
@@ -22,3 +25,6 @@ export const useUsers = () => useQuery({ queryKey: qk.users, queryFn: () => get<
 export const useServerInfo = () => useQuery({ queryKey: qk.server, queryFn: () => get<ServerInfo>('/server'), staleTime: Infinity });
 export const useIntegrations = (projectId: string | undefined) =>
   useQuery({ queryKey: qk.integrations(projectId ?? ''), queryFn: () => get<IntegrationView[]>(`/projects/${projectId}/integrations`), enabled: !!projectId });
+/** A text attachment's body (logs, timeline, crash report); attachments never change once stored. */
+export const useAttachmentText = (a: AttachmentView, enabled = true) =>
+  useQuery({ queryKey: qk.attachmentText(a.id), queryFn: () => fetchText(a.url), enabled, staleTime: Infinity });

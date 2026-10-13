@@ -1,8 +1,10 @@
 // The on-disk outbox (spec §7.2):
 //   Application Support/Snitch/outbox/<clientReportId>/
 //     report.json  — the ReportCreate body; written last, atomically
-//     screenshot.jpg, video.mp4, logs.txt
-//     state.json   — {reportId?, ticket?, attempts, nextAttemptAt, uploaded: [names]}
+//     screenshot.jpg, video.mp4, logs.txt, timeline.ndjson, crash.txt
+//     state.json   — {reportId?, ticket?, attempts, nextAttemptAt, uploaded: [names],
+//                     resumable, chunkBytes, offsets: {name: bytes}, restarts}
+//                    (the chunked-upload fields are 0.3; older files decode without them)
 // A directory is only eligible for upload once report.json exists, so a crash
 // mid-write never uploads half a report. Excluded from backup; file protection
 // completeUntilFirstUserAuthentication so uploads can resume while locked.
@@ -17,6 +19,30 @@ struct OutboxState: Codable, Equatable {
     /// Seconds since 1970.
     var nextAttemptAt: Double = 0
     var uploaded: [String] = []
+    /// The create response said `upload.resumable` (spec §11.2).
+    var resumable = false
+    /// Chunk size in use, clamped to CHUNK_BYTES_MIN…MAX; 0 until a resumable create.
+    var chunkBytes = 0
+    /// Bytes the server already has per attachment name.
+    var offsets: [String: Int] = [:]
+    /// Whole-file hash failures after which an attachment was restarted from 0.
+    var restarts = 0
+}
+
+extension OutboxState {
+    /// Every field optional on disk, so a state.json written by 0.2 still loads.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        reportId = try c.decodeIfPresent(String.self, forKey: .reportId)
+        ticket = try c.decodeIfPresent(String.self, forKey: .ticket)
+        attempts = try c.decodeIfPresent(Int.self, forKey: .attempts) ?? 0
+        nextAttemptAt = try c.decodeIfPresent(Double.self, forKey: .nextAttemptAt) ?? 0
+        uploaded = try c.decodeIfPresent([String].self, forKey: .uploaded) ?? []
+        resumable = try c.decodeIfPresent(Bool.self, forKey: .resumable) ?? false
+        chunkBytes = try c.decodeIfPresent(Int.self, forKey: .chunkBytes) ?? 0
+        offsets = try c.decodeIfPresent([String: Int].self, forKey: .offsets) ?? [:]
+        restarts = try c.decodeIfPresent(Int.self, forKey: .restarts) ?? 0
+    }
 }
 
 struct PendingReport {
@@ -40,6 +66,8 @@ final class Outbox {
         case "screenshot": return "screenshot.jpg"
         case "video": return "video.mp4"
         case "logs": return "logs.txt"
+        case "timeline": return "timeline.ndjson"
+        case "crash": return "crash.txt"
         default: return attachment + ".bin"
         }
     }
@@ -52,8 +80,9 @@ final class Outbox {
         self.root = root
     }
 
-    /// Application Support/Snitch/outbox, with Snitch/ excluded from backup.
-    static func makeDefault() -> Outbox? {
+    /// Application Support/Snitch (created, excluded from backup): the root of everything
+    /// the SDK stores on disk — the outbox and the crash follow-up files.
+    static func snitchDirectory() -> URL? {
         let fm = FileManager.default
         guard let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
         var snitchDir = support.appendingPathComponent("Snitch", isDirectory: true)
@@ -67,9 +96,15 @@ final class Outbox {
             values.isExcludedFromBackup = true
             try snitchDir.setResourceValues(values)
         } catch {
-            SDKLog.warn("Outbox unavailable: \(error)")
+            SDKLog.warn("Snitch's storage directory is unavailable: \(error)")
             return nil
         }
+        return snitchDir
+    }
+
+    /// Application Support/Snitch/outbox.
+    static func makeDefault() -> Outbox? {
+        guard let snitchDir = snitchDirectory() else { return nil }
         let outbox = Outbox(root: snitchDir.appendingPathComponent("outbox", isDirectory: true))
         try? outbox.ensureRoot()
         return outbox

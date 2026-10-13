@@ -5,6 +5,10 @@
   io.github.monjar.snitch.SERVER_URL meta-data (the Expo config plugin writes it).
   Remove the provider with tools:node="remove" to start Snitch from JavaScript instead.
 
+  A second provider, the React Native module's own, puts Snitch's interceptor into React
+  Native's OkHttp clients when the manifest has io.github.monjar.snitch.CAPTURE_NETWORK = true
+  (the config plugin's captureNetwork). It never starts Snitch.
+
   The system-capture service and activity are not declared here: the config
   plugin adds them (and their permissions) only for captureMode "system".
 -->
@@ -19,5 +23,9 @@
             android:authorities="${applicationId}.snitch-init"
             android:exported="false"
             android:initOrder="-100" />
+        <provider
+            android:name="io.github.monjar.snitch.rn.SnitchReactNativeInitProvider"
+            android:authorities="${applicationId}.snitch-rn-init"
+            android:exported="false" />
     </application>
 </manifest>

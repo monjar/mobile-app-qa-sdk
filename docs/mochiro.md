@@ -7,7 +7,7 @@ Mochiro (Expo 52, RN 0.76, iOS) uses Snitch through configuration only. Its own 
 
 | File | Change |
 |---|---|
-| `package.json` / `package-lock.json` | `"react-native-snitch": "^0.1.0"` |
+| `package.json` / `package-lock.json` | `"react-native-snitch": "^0.1.0"` (now `^0.1.1`; 0.3 below) |
 | `app.json` → `expo.plugins` | the entry below |
 
 ```json
@@ -87,6 +87,29 @@ behind the dashboard login.
 - **Rolling back** means removing the plugin entry and the dependency. Snitch leaves no data behind on devices
   beyond pending reports in Application Support.
 
+## What 0.3 adds for Mochiro, and what it can't see
+
+Upgrading is `npm install react-native-snitch@^0.3.0` plus, optionally, two plugin options:
+
+```json
+"captureNetwork": true,
+"checkInWhenInactive": true
+```
+
+What arrives with a report, without touching Mochiro's code:
+
+| Timeline part | In Mochiro's TestFlight builds |
+|---|---|
+| JS console | Thin. Mochiro's `logger` only prints to the console in `__DEV__`, so release builds mostly show React and library warnings/errors. The forwarder below fixes that, but it is a code change. |
+| Native log (os_log) | Yes: expo modules, networking errors, RN's own messages. |
+| Network | With `captureNetwork`: the `ServerClient` calls through React Native's `fetch`, and the streaming conversation through `expo/fetch` (Snitch sets Expo's session provider too). The stream is relayed chunk by chunk, but check a few conversations on TestFlight before relying on it. |
+| Screens | Almost nothing: one Stack with headers hidden, so the native inference sees the same screen. Route names need `useSnitchScreen(usePathname())` in `app/_layout.tsx`, a code change. |
+| Touches, foreground/background | Yes. |
+| Crash follow-up | Yes, from MetricKit on the next launch, with the previous session's log lines. |
+
+`checkInWhenInactive` makes a build that couldn't decide its release type show up on the Devices page as inactive,
+which is how the two TestFlight detection bugs fixed in 0.1.1 and 0.1.2 would have been visible on day one.
+
 ## Optional: attach Mochiro's logs
 
 This needs a few lines in Mochiro's source, so it is not done by default. Forward Mochiro's in-memory logger to
@@ -122,3 +145,8 @@ stays on the phone unless they send a report. Consider adding a line about it to
 6. Across about 10 reports, the ticket's *Capture* panel shows frame cost p95 under about 25 ms and a buffer under 6 MB.
 7. No `drawViewHierarchyInRect` crashes appear in TestFlight crash reports.
 8. After App Store release, the gesture does nothing and the server sees no config requests with `releaseType=appstore`.
+9. On the Devices page, the TestFlight install shows release type `testflight`, active, with signals
+   `receipt=sandboxReceipt`.
+10. After a real crash (swiping the app away or stopping it from Xcode is not a crash and won't count), the next
+    launch offers "The app closed unexpectedly. Report it?". MetricKit delivers on the next launch, sometimes a
+    minute or so after it.

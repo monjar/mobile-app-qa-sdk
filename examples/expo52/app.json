@@ -25,7 +25,8 @@
         {
           "serverUrl": "http://127.0.0.1:8080",
           "ingestKey": "snitch_pk_0123456789ABCDEFGHJKMNPQRS",
-          "enabledReleaseTypes": ["debug", "adhoc", "testflight", "internal"]
+          "enabledReleaseTypes": ["debug", "adhoc", "testflight", "internal"],
+          "captureNetwork": true
         }
       ],
       "./plugins/withFmtXcode26Patch.js"

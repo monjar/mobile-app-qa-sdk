@@ -24,6 +24,8 @@ export interface IntegrationRow {
   name: string;
   config_json: string;
   secret_enc: string | null;
+  /** GitHub only: signs the issue webhooks GitHub sends us. */
+  webhook_secret_enc: string | null;
   enabled: number;
   created_at: number;
   updated_at: number;
@@ -42,7 +44,12 @@ export interface EscalationRow {
   updated_at: number;
 }
 
-export function toIntegrationView(r: IntegrationRow): IntegrationView {
+/** Where GitHub delivers issue events for an integration (POST, signed with its webhook secret). */
+export function githubHookUrl(publicUrl: string, integrationId: string): string {
+  return `${publicUrl}/api/hooks/github/${integrationId}`;
+}
+
+export function toIntegrationView(r: IntegrationRow, publicUrl: string): IntegrationView {
   return {
     id: r.id,
     projectId: r.project_id,
@@ -51,6 +58,7 @@ export function toIntegrationView(r: IntegrationRow): IntegrationView {
     config: parseJson(r.config_json, {}) as IntegrationView['config'],
     hasSecret: r.secret_enc !== null,
     enabled: r.enabled === 1,
+    webhook: r.kind === 'github' ? { url: githubHookUrl(publicUrl, r.id), configured: r.webhook_secret_enc !== null } : null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -61,6 +69,7 @@ export class IntegrationsRepo {
     private readonly db: Db,
     private readonly now: Clock,
     private readonly box: SecretBox,
+    private readonly publicUrl: string,
   ) {}
 
   create(projectId: string, kind: IntegrationKind, name: string, config: unknown, secret: string | null): IntegrationView {
@@ -69,7 +78,7 @@ export class IntegrationsRepo {
     this.db
       .prepare('INSERT INTO integrations (id, project_id, kind, name, config_json, secret_enc, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
       .run(id, projectId, kind, name, toJson(config), secret ? this.box.seal(secret) : null, t, t);
-    return toIntegrationView(this.get(id)!);
+    return toIntegrationView(this.get(id)!, this.publicUrl);
   }
 
   get(id: string): IntegrationRow | null {
@@ -77,7 +86,7 @@ export class IntegrationsRepo {
   }
 
   list(projectId: string): IntegrationView[] {
-    return (this.db.prepare('SELECT * FROM integrations WHERE project_id = ? ORDER BY created_at').all(projectId) as IntegrationRow[]).map(toIntegrationView);
+    return (this.db.prepare('SELECT * FROM integrations WHERE project_id = ? ORDER BY created_at').all(projectId) as IntegrationRow[]).map((r) => toIntegrationView(r, this.publicUrl));
   }
 
   update(id: string, patch: { name?: string; config?: unknown; secret?: string; enabled?: boolean }): IntegrationView | null {
@@ -93,7 +102,7 @@ export class IntegrationsRepo {
       this.db.prepare(`UPDATE integrations SET ${sets.join(', ')} WHERE id = ?`).run(...args);
     }
     const r = this.get(id);
-    return r ? toIntegrationView(r) : null;
+    return r ? toIntegrationView(r, this.publicUrl) : null;
   }
 
   delete(id: string): void {
@@ -102,6 +111,14 @@ export class IntegrationsRepo {
 
   secret(row: IntegrationRow): string | null {
     return row.secret_enc ? this.box.open(row.secret_enc) : null;
+  }
+
+  setWebhookSecret(id: string, secret: string): void {
+    this.db.prepare('UPDATE integrations SET webhook_secret_enc = ?, updated_at = ? WHERE id = ?').run(this.box.seal(secret), this.now(), id);
+  }
+
+  webhookSecret(row: IntegrationRow): string | null {
+    return row.webhook_secret_enc ? this.box.open(row.webhook_secret_enc) : null;
   }
 
   // ── Routing ──────────────────────────────────────────────────────────────
@@ -178,6 +195,29 @@ export class IntegrationsRepo {
       )
       .run(id, ticketId, integrationId, userId, t, t);
     return this.escalation(id);
+  }
+
+  /** The sent escalation of an integration that created external item `externalId` (a GitHub issue number). */
+  escalationByExternalId(integrationId: string, externalId: string): EscalationRow | null {
+    return (
+      (this.db
+        .prepare("SELECT * FROM escalations WHERE integration_id = ? AND external_id = ? AND state = 'sent' ORDER BY created_at LIMIT 1")
+        .get(integrationId, externalId) as EscalationRow | undefined) ?? null
+    );
+  }
+
+  /** A ticket's sent escalations to enabled GitHub integrations, with the integration row. */
+  sentGithubEscalations(ticketId: string): { escalation: EscalationRow; integration: IntegrationRow }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT e.id FROM escalations e JOIN integrations i ON i.id = e.integration_id
+         WHERE e.ticket_id = ? AND e.state = 'sent' AND e.external_id IS NOT NULL AND i.kind = 'github' AND i.enabled = 1 ORDER BY e.created_at`,
+      )
+      .all(ticketId) as { id: string }[];
+    return rows.map((r) => {
+      const escalation = this.escalation(r.id)!;
+      return { escalation, integration: this.get(escalation.integration_id)! };
+    });
   }
 
   markSent(id: string, externalId: string | null, externalUrl: string | null): void {

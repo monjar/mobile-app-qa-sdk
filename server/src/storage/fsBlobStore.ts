@@ -1,8 +1,8 @@
 import { createReadStream } from 'node:fs';
-import { access, constants, copyFile, mkdir, readFile, rename, rm, unlink, writeFile } from 'node:fs/promises';
-import { dirname, join, normalize, sep } from 'node:path';
+import { access, constants, copyFile, mkdir, readdir, readFile, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import { dirname, join, normalize, relative, sep } from 'node:path';
 import type { Readable } from 'node:stream';
-import type { BlobRange, BlobStore } from './blobStore';
+import type { BlobInfo, BlobRange, BlobStore } from './blobStore';
 
 export class FsBlobStore implements BlobStore {
   readonly kind = 'fs' as const;
@@ -30,6 +30,38 @@ export class FsBlobStore implements BlobStore {
 
   readAll(key: string): Promise<Buffer> {
     return readFile(this.path(key));
+  }
+
+  async head(key: string): Promise<{ size: number } | null> {
+    try {
+      const s = await stat(this.path(key));
+      return s.isFile() ? { size: s.size } : null;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      throw e;
+    }
+  }
+
+  async list(prefix: string): Promise<BlobInfo[]> {
+    // Walk only the directory the prefix names; keys are paths under the root.
+    const slash = prefix.lastIndexOf('/');
+    const dir = slash >= 0 ? this.path(prefix.slice(0, slash + 1)) : normalize(this.root);
+    let entries: string[];
+    try {
+      entries = await readdir(dir, { recursive: true });
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw e;
+    }
+    const out: BlobInfo[] = [];
+    for (const entry of entries) {
+      const full = join(dir, entry);
+      const key = relative(normalize(this.root), full).split(sep).join('/');
+      if (!key.startsWith(prefix) || key === '.probe') continue;
+      const s = await stat(full).catch(() => null);
+      if (s?.isFile()) out.push({ key, size: s.size, lastModified: s.mtimeMs });
+    }
+    return out.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
   }
 
   async delete(key: string): Promise<void> {

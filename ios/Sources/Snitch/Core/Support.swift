@@ -5,7 +5,7 @@ import Foundation
 import QuartzCore
 
 enum SnitchVersion {
-    static let current = "0.2.0"
+    static let current = "0.3.0"
     static let sdkName = "snitch-ios"
 }
 
@@ -25,6 +25,7 @@ enum DefaultsKey {
     static let crashLoopDowngrades = "snitch.crashLoopDowngrades"
     static let noticeShown = "snitch.noticeShown"
     static let reporterEmail = "snitch.reporterEmail"
+    static let installId = "snitch.installId"
 }
 
 /// A value guarded by a lock, readable from any thread.

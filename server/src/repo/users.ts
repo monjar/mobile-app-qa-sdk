@@ -22,6 +22,9 @@ export interface UserRow {
   created_at: number;
   last_login_at: number | null;
   disabled_at: number | null;
+  /** Linked GitHub account (Sign in with GitHub). */
+  github_id: number | null;
+  github_login: string | null;
 }
 
 export function toUserView(r: UserRow): UserView {
@@ -62,6 +65,14 @@ export class UsersRepo {
 
   getByEmail(email: string): UserRow | null {
     return (this.db.prepare('SELECT * FROM users WHERE email = ?').get(email.trim()) as UserRow | undefined) ?? null;
+  }
+
+  getByGithubId(githubId: number): UserRow | null {
+    return (this.db.prepare('SELECT * FROM users WHERE github_id = ?').get(githubId) as UserRow | undefined) ?? null;
+  }
+
+  linkGithub(id: string, githubId: number, login: string): void {
+    this.db.prepare('UPDATE users SET github_id = ?, github_login = ? WHERE id = ?').run(githubId, login, id);
   }
 
   view(id: string): UserView | null {
@@ -152,6 +163,8 @@ export class SessionsRepo {
         created_at: row.created_at,
         last_login_at: row.last_login_at,
         disabled_at: row.disabled_at,
+        github_id: row.github_id,
+        github_login: row.github_login,
       },
     };
   }

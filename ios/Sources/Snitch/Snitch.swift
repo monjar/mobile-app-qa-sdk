@@ -1,4 +1,4 @@
-// Public API of the Snitch iOS SDK (spec §8.1).
+// Public API of the Snitch iOS SDK (spec §8.1, §11.9).
 //
 // Everything here is a thin, thread-safe front for SnitchRuntime: calls may come
 // from any thread and hop to the main thread internally. State the app sets before
@@ -69,6 +69,18 @@ public struct SnitchOptions {
     public var edgeHandlePosition: Double
     /// Edge handle tint as "#RRGGBB" or "#RRGGBBAA"; nil uses the system tint.
     public var edgeHandleColor: String?
+    /// Log lines in the report timeline: `Snitch.log` and this process's unified log (os_log/NSLog).
+    public var captureConsole: Bool
+    /// HTTP requests in the report timeline (method, sanitized URL, status, timing; never
+    /// headers or bodies). Off by default: it puts a URLProtocol in front of URLSession.shared.
+    public var captureNetwork: Bool
+    /// Screen changes in the report timeline: `Snitch.setScreen`, or the top view controller.
+    public var trackScreens: Bool
+    /// After an unexpected exit, offer to report it on the next launch (needs a server with `trigger-crash`).
+    public var crashPrompt: Bool
+    /// When the release type can't be determined, send one diagnostic config request per launch
+    /// (`active=0`) so the build shows up on the server's Devices page. The SDK stays inert otherwise.
+    public var checkInWhenInactive: Bool
 
     public init(
         enabledReleaseTypes: Set<SnitchReleaseType> = [.debug, .adhoc, .enterprise, .testflight, .`internal`],
@@ -80,7 +92,12 @@ public struct SnitchOptions {
         showTesterNotice: Bool = true,
         edgeHandleSide: EdgeHandleSide = .right,
         edgeHandlePosition: Double = 0.33,
-        edgeHandleColor: String? = nil
+        edgeHandleColor: String? = nil,
+        captureConsole: Bool = true,
+        captureNetwork: Bool = false,
+        trackScreens: Bool = true,
+        crashPrompt: Bool = true,
+        checkInWhenInactive: Bool = false
     ) {
         self.enabledReleaseTypes = enabledReleaseTypes
         self.gesture = gesture
@@ -92,6 +109,11 @@ public struct SnitchOptions {
         self.edgeHandleSide = edgeHandleSide
         self.edgeHandlePosition = EdgeHandleGeometry.clampPosition(edgeHandlePosition)
         self.edgeHandleColor = EdgeHandleGeometry.isValidHexColor(edgeHandleColor) ? edgeHandleColor : nil
+        self.captureConsole = captureConsole
+        self.captureNetwork = captureNetwork
+        self.trackScreens = trackScreens
+        self.crashPrompt = crashPrompt
+        self.checkInWhenInactive = checkInWhenInactive
     }
 }
 
@@ -121,9 +143,26 @@ public enum Snitch {
         UserContext.shared.setMetadata(key, value)
     }
 
-    /// Adds a line to the log attached to reports (last 200 lines, ≤ 256 KB).
+    /// Adds a line to the log attached to reports (last 200 lines, ≤ 256 KB) and, with
+    /// `captureConsole`, to the report timeline.
     public static func log(_ message: String, level: SnitchLogLevel = .info) {
         LogRing.shared.append(message, level: level)
+        TimelineRecorder.shared.log(level: TimelineLogLevel(rawValue: level.rawValue) ?? .info, source: .app, message: message)
+    }
+
+    /// Names the screen the tester is on, for the report timeline and the report's `screen`.
+    /// Once the app calls this, Snitch stops inferring screens from view controllers for the
+    /// rest of the process. nil records nothing (the app still owns screen naming).
+    public static func setScreen(_ name: String?) {
+        TimelineRecorder.shared.setAppScreen(name)
+    }
+
+    /// Adds Snitch's network recorder to a configuration for a URLSession the app creates
+    /// itself (`URLSession.shared` is covered automatically when `captureNetwork` is on).
+    /// Call it before creating the session; requests are only recorded while Snitch is
+    /// active with `captureNetwork` on, otherwise they pass straight through.
+    public static func captureNetwork(in configuration: URLSessionConfiguration) {
+        SnitchURLProtocol.install(in: configuration)
     }
 
     /// A closure called when a report is sent; its text is attached to the report log.

@@ -1,6 +1,9 @@
 // UI tests driven through the SDK's debug hooks (debug builds only):
 // - autoreport: the app files a report on its own; the CI job then checks that the
-//   Snitch server on 127.0.0.1:8080 received it (with screenshot and video)
+//   Snitch server on 127.0.0.1:8080 received it (screenshot, video and timeline).
+//   Chunks are capped at the 64 KB minimum so the screenshot and video go up in
+//   resumable chunks on servers that offer them. The swipes land before the report
+//   so its timeline has touches next to the app's log line, request and screen.
 // - cancellation: the real fire path runs 300 ms into a press, so the app's 600 ms
 //   long-press must never fire; a control test shows it does fire without the hook
 
@@ -26,7 +29,8 @@ final class SnitchExampleUITests: XCTestCase {
         let app = launch([
             "SNITCH_DEBUG_SERVER_URL": serverURL,
             "SNITCH_DEBUG_INGEST_KEY": ingestKey,
-            "SNITCH_DEBUG_AUTOREPORT": "6",
+            "SNITCH_DEBUG_AUTOREPORT": "10",
+            "SNITCH_DEBUG_CHUNK_BYTES": "65536",
         ])
         XCTAssertTrue(app.staticTexts["longPressLabel"].waitForExistence(timeout: 20))
 
@@ -39,7 +43,7 @@ final class SnitchExampleUITests: XCTestCase {
 
         // Keep the app in the foreground while the SDK composes and uploads the report.
         let uploadWindow = XCTestExpectation(description: "upload window")
-        _ = XCTWaiter.wait(for: [uploadWindow], timeout: 25)
+        _ = XCTWaiter.wait(for: [uploadWindow], timeout: 30)
         XCTAssertEqual(app.state, .runningForeground)
     }
 

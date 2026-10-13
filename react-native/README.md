@@ -53,9 +53,21 @@ Snitch.show('bug');                                  // open the report sheet
 Snitch.setUser({ id: '42', email: 'qa@example.com' });
 Snitch.setMetadata('plan', 'pro');                   // null removes
 Snitch.log('checkout started', 'info');
+Snitch.setScreen('Checkout');                        // screen in the report timeline
 Snitch.setEnabled(false);                            // pause at runtime
 Snitch.isEnabled();                                  // boolean
 Snitch.releaseType();                                // 'debug' | 'testflight' | …
+```
+
+## Timeline
+
+Reports include what happened in the last minutes: JavaScript console lines, screen changes,
+touches and, with `"captureNetwork": true` in the plugin options, request summaries (method, URL
+without query values, status, timing; never headers or bodies). Name screens from your router:
+
+```tsx
+useSnitchScreen(usePathname());                      // expo-router root layout
+useEffect(() => trackNavigationContainer(navigationRef), [navigationRef]); // React Navigation
 ```
 
 Mask sensitive views in screenshots and video with a `testID` prefix:

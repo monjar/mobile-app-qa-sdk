@@ -19,15 +19,24 @@ internal object ReportBuilder {
     private val ATTACHMENT_NAME = Regex("^[a-z0-9_-]{1,32}$")
     private val SHA256_HEX = Regex("^[0-9a-f]{64}$")
 
+    /** zod 4's `z.uuid()` (RFC 9562 version and variant), lowercase. */
+    private val UUID = Regex("^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
+
     /** zod 4's `z.email()` pattern, so the server never rejects an address the SDK accepted. */
     private val EMAIL = Regex("^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$")
 
-    const val MAX_ATTACHMENTS = 5
+    /**
+     * contract MAX_ATTACHMENTS. Snitch itself sends at most four (screenshot, video,
+     * logs and timeline; or screenshot, timeline and crash), within the five a 0.2 server accepts.
+     */
+    const val MAX_ATTACHMENTS = 8
     const val MAX_CUSTOM_KEYS = 50
 
     fun isValidEmail(value: String?): Boolean = value != null && value.length <= 254 && EMAIL.matches(value)
 
     fun isValidReportType(value: String?): Boolean = value != null && REPORT_TYPE_ID.matches(value)
+
+    fun isValidUuid(value: String?): Boolean = value != null && UUID.matches(value)
 
     fun toJson(p: ReportPayload): JSONObject {
         val o = JSONObject()
@@ -42,6 +51,8 @@ internal object ReportBuilder {
         o.put("sdk", sdkJson(p.sdk))
         customJson(p.custom)?.let { o.put("custom", it) }
         statsJson(p.stats)?.let { o.put("stats", it) }
+        p.screen?.trim()?.takeIf { it.isNotEmpty() }?.let { o.put("screen", it.take(200)) }
+        p.installId?.lowercase()?.takeIf { isValidUuid(it) }?.let { o.put("installId", it) }
         val attachments = JSONArray()
         val seen = HashSet<String>()
         for (a in p.attachments) {

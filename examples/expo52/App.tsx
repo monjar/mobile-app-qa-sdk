@@ -7,6 +7,8 @@
  * - A Skia canvas animated by Reanimated: Metal content that must appear in the video.
  * - A TextInput (masked: editable) and a view with testID "snitch-mask-demo" (masked by testID).
  * - "Report" opens the sheet from JavaScript.
+ * - Once Snitch is active: Snitch.setScreen('Home'), a console.log and a fetch, so a report's timeline
+ *   (CI's debug autoreport fires 10 s after launch) holds a screen, a JavaScript log line and a request.
  */
 import { Canvas, Circle, Fill } from '@shopify/react-native-skia';
 import { useEffect, useState } from 'react';
@@ -17,6 +19,13 @@ import { Snitch } from 'react-native-snitch';
 
 const ROWS = ['Row 1', 'Row 2', 'Row 3', 'Row 4', 'Row 5'];
 const CANVAS_HEIGHT = 120;
+
+// The CI Snitch server (app.json serverUrl, http://127.0.0.1:8080) under another host name: Snitch
+// never records requests to its own server, and this one has to appear in the timeline. The Android
+// emulator reaches it through `adb reverse tcp:8080 tcp:8080`.
+const E2E_HEALTH_URL = 'http://localhost:8080/health';
+const E2E_POLL_MS = 500;
+const E2E_MAX_POLLS = 20;
 
 export default function App() {
   const dark = useColorScheme() === 'dark';
@@ -29,9 +38,30 @@ export default function App() {
   const [panCancelled, setPanCancelled] = useState(0);
   const [canvasWidth, setCanvasWidth] = useState(0);
   const [status, setStatus] = useState('');
+  const [e2e, setE2e] = useState('');
 
   useEffect(() => {
     setStatus(`releaseType: ${Snitch.releaseType()} · enabled: ${String(Snitch.isEnabled())}`);
+  }, []);
+
+  // Timeline content for the end-to-end report. Snitch records nothing until it is active, so wait
+  // for that (it usually is by the first poll); give up after 10 s, e.g. in Expo Go.
+  useEffect(() => {
+    let polls = 0;
+    const timer = setInterval(() => {
+      polls += 1;
+      if (!Snitch.isEnabled()) {
+        if (polls >= E2E_MAX_POLLS) clearInterval(timer);
+        return;
+      }
+      clearInterval(timer);
+      Snitch.setScreen('Home');
+      console.log('snitch-e2e: ready');
+      fetch(E2E_HEALTH_URL)
+        .then((response) => setE2e(`e2e: health ${response.status}`))
+        .catch((error: unknown) => setE2e(`e2e: health failed (${String(error)})`));
+    }, E2E_POLL_MS);
+    return () => clearInterval(timer);
   }, []);
 
   const pan = Gesture.Pan()
@@ -54,6 +84,9 @@ export default function App() {
         <Text style={[styles.title, { color: colors.fg }]}>Snitch example</Text>
         <Text style={[styles.caption, { color: colors.muted }]} testID="snitch-status">
           {status}
+        </Text>
+        <Text style={[styles.caption, { color: colors.muted }]} testID="e2e-status">
+          {e2e}
         </Text>
 
         <View style={styles.counters}>

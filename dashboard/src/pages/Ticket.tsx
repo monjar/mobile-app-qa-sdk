@@ -2,13 +2,16 @@
  * One ticket: what the tester said and saw, where it came from, what happened
  * to it since, and where to send it next.
  */
-import { useState, type FormEvent } from 'react';
+import { useCallback, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation } from 'wouter';
 import {
   TICKET_STATUSES,
+  TIMELINE_ATTACHMENT,
+  TIMELINE_CONTENT_TYPE,
   type AttachmentView,
   type IntegrationView,
+  type SimilarTicketView,
   type TicketDetail,
   type TicketEventView,
   type TicketPatch,
@@ -16,10 +19,16 @@ import {
 } from '@snitch/contract';
 import { del, errorText, get, patch, post } from '../lib/api';
 import { RELEASE_LABEL, STATUS_LABEL, bytes, dateTime, osName, relativeTime } from '../lib/format';
-import { qk, useIntegrations, useUsers } from '../lib/queries';
+import { qk, useAttachmentText, useIntegrations, useProjects, useUsers } from '../lib/queries';
 import { useAuth } from '../lib/auth';
-import { ArrowLeft, External, Link as LinkIcon, Send } from '../components/icons';
-import { Avatar, Dialog, EscalationPill, IntegrationIcon, useToast } from '../components/ui';
+import { Alert, ArrowLeft, Chevron, External, Link as LinkIcon, Send } from '../components/icons';
+import { Avatar, CopyButton, Dialog, EscalationPill, IntegrationIcon, StatusPill, useToast } from '../components/ui';
+import { VideoPlayer, type Playhead } from '../components/Player';
+import { TimelinePanel } from '../components/Timeline';
+
+/** The attachment an SDK sends with a crash follow-up (docs/sdk-spec.md §11.8). */
+const CRASH_ATTACHMENT = 'crash';
+const TEXT_TYPES = new Set(['text/plain', 'application/x-ndjson']);
 
 export function Ticket({ id }: { id: string }) {
   const qc = useQueryClient();
@@ -60,6 +69,8 @@ export function Ticket({ id }: { id: string }) {
     onError: (e) => toast(errorText(e)),
   });
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [fixedInDialog, setFixedInDialog] = useState<'resolve' | 'edit' | null>(null);
+  const projects = useProjects();
 
   if (ticket.isLoading) return <div className="page empty">Loading…</div>;
   if (ticket.isError || !ticket.data) return <div className="page empty error-text">{ticket.error ? errorText(ticket.error) : 'Not found'}</div>;
@@ -68,7 +79,10 @@ export function Ticket({ id }: { id: string }) {
   const typeLabel = (tid: string) => d.project.reportTypes.find((r) => r.id === tid)?.label ?? tid;
   const screenshot = d.attachments.find((a) => a.stored && a.contentType.startsWith('image/'));
   const video = d.attachments.find((a) => a.stored && a.contentType === 'video/mp4');
-  const logs = d.attachments.find((a) => a.stored && (a.contentType === 'text/plain' || a.contentType === 'application/x-ndjson'));
+  const timeline = d.attachments.find((a) => a.stored && a.name === TIMELINE_ATTACHMENT && a.contentType === TIMELINE_CONTENT_TYPE);
+  const crash = d.attachments.find((a) => a.stored && a.name === CRASH_ATTACHMENT);
+  const logs = d.attachments.filter((a) => a.stored && a !== timeline && a !== crash && TEXT_TYPES.has(a.contentType));
+  const onStatus = (status: TicketStatus) => (status === 'resolved' ? setFixedInDialog('resolve') : patchTicket.mutate({ status }));
 
   return (
     <div className="page">
@@ -84,7 +98,7 @@ export function Ticket({ id }: { id: string }) {
       <div className="stack" style={{ marginBottom: 16 }}>
         <TitleEditor key={t.title} value={t.title} onSave={(title) => patchTicket.mutate({ title })} />
         <div className="row wrap">
-          <select aria-label="Status" value={t.status} onChange={(e) => patchTicket.mutate({ status: e.target.value as TicketStatus })}>
+          <select aria-label="Status" value={t.status} onChange={(e) => onStatus(e.target.value as TicketStatus)}>
             {TICKET_STATUSES.map((s) => (
               <option key={s} value={s}>
                 {STATUS_LABEL[s]}
@@ -109,6 +123,19 @@ export function Ticket({ id }: { id: string }) {
                 </option>
               ))}
           </select>
+          {t.trigger === 'crash' && (
+            <span className="pill warn" title="Sent from the prompt an app shows on the launch after an unexpected exit">
+              <Alert className="icon-inline" /> Reported after a crash
+            </span>
+          )}
+          {t.status === 'resolved' ? (
+            <button type="button" className="pill resolved pill-button" onClick={() => setFixedInDialog('edit')} title="Change the build this is fixed in">
+              {t.fixedIn ? `Fixed in ${t.fixedIn}` : 'Add fixed-in build'}
+            </button>
+          ) : (
+            t.fixedIn && <span className="pill">Fixed in {t.fixedIn}</span>
+          )}
+          {t.duplicateOfId && <DuplicateOf id={t.duplicateOfId} events={d.events} />}
           <span className="spacer" />
           <span className="muted small" title={dateTime(t.createdAt)}>
             Reported {relativeTime(t.reportedAt)}
@@ -130,23 +157,20 @@ export function Ticket({ id }: { id: string }) {
             </div>
           </section>
 
-          {(screenshot || video) && (
-            <section className="card">
-              <div className="card-body media">
-                {screenshot && <Screenshot a={screenshot} />}
-                {video && <Video a={video} />}
-              </div>
-            </section>
-          )}
+          <ReportMedia screenshot={screenshot} video={video} timeline={timeline} reportedAt={t.reportedAt} />
 
-          {logs && <Logs a={logs} />}
+          {crash && <CrashReport a={crash} defaultOpen={t.trigger === 'crash'} />}
+
+          {logs.map((a) => (
+            <Logs key={a.id} a={a} />
+          ))}
 
           <section className="card">
             <div className="card-header">
               <h2>Activity</h2>
             </div>
             <div className="card-body stack">
-              <Timeline events={d.events} typeLabel={typeLabel} users={users.data ?? []} />
+              <ActivityList events={d.events} typeLabel={typeLabel} users={users.data ?? []} />
               <CommentBox ticketId={id} onDone={update} />
             </div>
           </section>
@@ -154,6 +178,8 @@ export function Ticket({ id }: { id: string }) {
 
         <aside className="stack">
           <EscalatePanel d={d} integrations={integrations.data ?? []} onEscalate={(iid) => escalate.mutate(iid)} busy={escalate.isPending} isAdmin={user?.role === 'admin'} />
+
+          <SimilarPanel d={d} onDone={update} />
 
           <section className="card">
             <div className="card-header">
@@ -165,9 +191,10 @@ export function Ticket({ id }: { id: string }) {
                   <Row k="App" v={`${t.app.name ?? t.app.id} ${t.app.version} (${t.app.build})`} />
                   <Row k="Bundle" v={t.app.id} mono />
                   <Row k="Build" v={RELEASE_LABEL[t.releaseType]} />
+                  {t.screen && <Row k="Screen" v={t.screen} />}
                   <Row k="Device" v={`${t.device.manufacturer ? `${t.device.manufacturer} ` : ''}${t.device.model}`} />
                   <Row k="OS" v={`${osName(t.platform)} ${t.device.osVersion}`} />
-                  {t.device.screen && <Row k="Screen" v={`${t.device.screen.width}×${t.device.screen.height} @${t.device.screen.scale}x ${t.device.screen.orientation}`} />}
+                  {t.device.screen && <Row k="Display" v={`${t.device.screen.width}×${t.device.screen.height} @${t.device.screen.scale}x ${t.device.screen.orientation}`} />}
                   {t.device.locale && <Row k="Locale" v={`${t.device.locale}${t.device.timeZone ? ` · ${t.device.timeZone}` : ''}`} />}
                   {t.device.network && <Row k="Network" v={t.device.network} />}
                   {t.device.memory?.appMB !== undefined && <Row k="Memory" v={`${Math.round(t.device.memory.appMB)} MB used${t.device.memory.totalMB ? ` of ${Math.round(t.device.memory.totalMB / 1024)} GB` : ''}`} />}
@@ -177,7 +204,7 @@ export function Ticket({ id }: { id: string }) {
                   {t.device.screenReader && <Row k="Screen reader" v="On" />}
                   {t.device.fontScale && t.device.fontScale !== 1 && <Row k="Text size" v={`${t.device.fontScale}×`} />}
                   <Row k="SDK" v={`${t.sdk.name} ${t.sdk.version}${t.sdk.wrapper ? ` (${t.sdk.wrapper} ${t.sdk.wrapperVersion ?? ''})` : ''}`} />
-                  {t.trigger && <Row k="Opened by" v={t.trigger} />}
+                  {t.trigger && <Row k="Opened by" v={t.trigger === 'crash' ? 'crash prompt, after an unexpected exit' : t.trigger} />}
                 </tbody>
               </table>
             </div>
@@ -249,6 +276,20 @@ export function Ticket({ id }: { id: string }) {
           <p style={{ margin: 0 }}>The report, its screenshot, video and history are removed for good. Issues already created elsewhere stay.</p>
         </Dialog>
       )}
+
+      {fixedInDialog && (
+        <FixedInDialog
+          title={fixedInDialog === 'resolve' ? `Resolve ${t.key}` : 'Fixed in build'}
+          action={fixedInDialog === 'resolve' ? 'Resolve' : 'Save'}
+          initial={t.fixedIn}
+          notify={fixedInDialog === 'resolve' && t.reporter.email && projects.data?.find((p) => p.id === d.project.id)?.notifyReporters ? t.reporter.email : null}
+          busy={patchTicket.isPending}
+          onClose={() => setFixedInDialog(null)}
+          onSave={(fixedIn) =>
+            patchTicket.mutate(fixedInDialog === 'resolve' ? { status: 'resolved', fixedIn } : { fixedIn }, { onSuccess: () => setFixedInDialog(null) })
+          }
+        />
+      )}
     </div>
   );
 }
@@ -307,52 +348,231 @@ function Screenshot({ a }: { a: AttachmentView }) {
   );
 }
 
-function Video({ a }: { a: AttachmentView }) {
-  const [rate, setRate] = useState(1);
+/**
+ * Screenshot, clip and timeline. The playhead lives here rather than on the page,
+ * so playback re-renders only these cards.
+ */
+function ReportMedia({ screenshot, video, timeline, reportedAt }: { screenshot?: AttachmentView; video?: AttachmentView; timeline?: AttachmentView; reportedAt: number }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [playhead, setPlayhead] = useState<Playhead | null>(null);
+  const seek = useCallback((seconds: number) => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.currentTime = seconds;
+    setPlayhead({ time: v.currentTime, playing: !v.paused && !v.ended });
+  }, []);
   return (
-    <figure>
-      <video
-        className="clip"
-        src={a.url}
-        controls
-        playsInline
-        preload="metadata"
-        ref={(el) => {
-          if (el) el.playbackRate = rate;
-        }}
-      />
-      <figcaption>
-        <span>{a.durationMs ? `${(a.durationMs / 1000).toFixed(0)} s recording` : 'Recording'}</span>
-        <span className="row" style={{ gap: 4 }}>
-          {[0.5, 1, 2].map((r) => (
-            <button key={r} type="button" className={`small ${rate === r ? 'primary' : 'ghost'}`} onClick={() => setRate(r)}>
-              {r}×
-            </button>
-          ))}
-        </span>
-      </figcaption>
-    </figure>
+    <>
+      {(screenshot || video) && (
+        <section className="card">
+          <div className="card-body media">
+            {screenshot && <Screenshot a={screenshot} />}
+            {video && <VideoPlayer a={video} videoRef={videoRef} playhead={playhead} onPlayhead={setPlayhead} />}
+          </div>
+        </section>
+      )}
+      {timeline && <TimelinePanel a={timeline} reportedAt={reportedAt} playhead={playhead} onSeek={video ? seek : null} />}
+    </>
   );
 }
 
 function Logs({ a }: { a: AttachmentView }) {
-  const logs = useQuery({ queryKey: ['logs', a.id], queryFn: async () => (await fetch(a.url, { credentials: 'same-origin' })).text() });
+  const logs = useAttachmentText(a);
   return (
     <section className="card">
       <div className="card-header">
-        <h2>Logs</h2>
+        <h2>{a.name === 'logs' ? 'Logs' : a.name}</h2>
         <a href={a.url} target="_blank" rel="noreferrer" className="small">
           Raw
         </a>
       </div>
       <div className="card-body" style={{ maxHeight: 320, overflowY: 'auto' }}>
-        <pre>{logs.data ?? 'Loading…'}</pre>
+        <pre>{logs.isError ? errorText(logs.error) : (logs.data ?? 'Loading…')}</pre>
       </div>
     </section>
   );
 }
 
-function describe(e: TicketEventView, typeLabel: (id: string) => string, userName: (id: unknown) => string): string {
+/** MetricKit diagnostics are JSON; Android traces are plain text. */
+function prettyCrash(text: string): string {
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2);
+  } catch {
+    return text;
+  }
+}
+
+function CrashReport({ a, defaultOpen }: { a: AttachmentView; defaultOpen: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const text = useAttachmentText(a, open);
+  const pretty = useMemo(() => (text.data === undefined ? null : prettyCrash(text.data)), [text.data]);
+  const bodyId = `crash-${a.id}`;
+  return (
+    <section className="card">
+      <div className="card-header">
+        <h2>
+          <button type="button" className="disclosure-button" aria-expanded={open} aria-controls={bodyId} onClick={() => setOpen((o) => !o)}>
+            <Chevron className={`icon-inline disclosure${open ? ' open' : ''}`} /> Crash report
+          </button>
+        </h2>
+        <span className="row">
+          <span className="muted small">{bytes(a.sizeBytes)}</span>
+          {open && pretty !== null && <CopyButton text={pretty} />}
+          <a href={a.url} target="_blank" rel="noreferrer" className="small">
+            Raw
+          </a>
+        </span>
+      </div>
+      {open && (
+        <div id={bodyId} className="card-body" style={{ maxHeight: 420, overflowY: 'auto' }}>
+          <pre>{text.isError ? errorText(text.error) : (pretty ?? 'Loading…')}</pre>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function FixedInDialog({
+  title,
+  action,
+  initial,
+  notify,
+  busy,
+  onSave,
+  onClose,
+}: {
+  title: string;
+  action: string;
+  initial: string | null;
+  /** The reporter's address, when resolving emails them. */
+  notify: string | null;
+  busy: boolean;
+  onSave: (fixedIn: string | null) => void;
+  onClose: () => void;
+}) {
+  const [value, setValue] = useState(initial ?? '');
+  return (
+    <Dialog
+      title={title}
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="submit" form="fixed-in-form" className="primary" disabled={busy}>
+            {action}
+          </button>
+        </>
+      }
+    >
+      <form
+        id="fixed-in-form"
+        className="form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          onSave(value.trim() || null);
+        }}
+      >
+        <label className="field">
+          Fixed in build (optional)
+          <input value={value} onChange={(e) => setValue(e.target.value)} maxLength={64} placeholder="e.g. 0.6.1 (18)" autoFocus />
+          <span className="field-hint">The version and build the fix ships in, so testers know which build to check.</span>
+        </label>
+        {notify && <div className="notice small">{notify} will get an email that this is fixed{value.trim() ? ` in ${value.trim()}` : ''}.</div>}
+      </form>
+    </Dialog>
+  );
+}
+
+/** Link to the ticket this one duplicates; the key comes from the duplicate_marked event when there is one. */
+function DuplicateOf({ id, events }: { id: string; events: TicketEventView[] }) {
+  const fromEvent = events.findLast((e) => e.kind === 'duplicate_marked' && e.data.duplicateOfId === id)?.data.key;
+  const known = typeof fromEvent === 'string' ? fromEvent : null;
+  const original = useQuery({ queryKey: qk.ticket(id), queryFn: () => get<TicketDetail>(`/tickets/${id}`), enabled: !known });
+  return (
+    <Link href={`/tickets/${id}`} className="pill">
+      Duplicate of {known ?? original.data?.ticket.key ?? 'another ticket'}
+    </Link>
+  );
+}
+
+function SimilarPanel({ d, onDone }: { d: TicketDetail; onDone: (d: TicketDetail) => void }) {
+  const toast = useToast();
+  const qc = useQueryClient();
+  const [confirm, setConfirm] = useState<SimilarTicketView | null>(null);
+  const mark = useMutation({
+    mutationFn: (s: SimilarTicketView) => patch<TicketDetail>(`/tickets/${d.ticket.id}`, { duplicateOfId: s.id, status: 'duplicate' } satisfies TicketPatch),
+    onSuccess: (data, s) => {
+      onDone(data);
+      void qc.invalidateQueries({ queryKey: qk.ticket(s.id) });
+      setConfirm(null);
+      toast(`Marked as a duplicate of ${s.key}`);
+    },
+    onError: (e) => toast(errorText(e)),
+  });
+  if (d.similar.length === 0) return null;
+  return (
+    <section className="card">
+      <div className="card-header">
+        <h2>Similar tickets</h2>
+      </div>
+      <div className="card-body side-section">
+        {d.similar.map((s) => (
+          <div key={s.id} className="similar">
+            <div className="row">
+              <Link href={`/tickets/${s.id}`} className="mono small">
+                {s.key}
+              </Link>
+              <StatusPill status={s.status} />
+              <span className="spacer" />
+              <span className="similar-score" title="How alike the two reports are">
+                {Math.round(s.score * 100)}%
+              </span>
+            </div>
+            <Link href={`/tickets/${s.id}`} className="similar-title">
+              {s.title}
+            </Link>
+            {s.reasons.length > 0 && <div className="muted small">{s.reasons.join(' · ')}</div>}
+            {d.ticket.duplicateOfId === s.id ? (
+              <span className="muted small">This ticket is marked as its duplicate.</span>
+            ) : (
+              <div>
+                <button type="button" className="small" onClick={() => setConfirm(s)}>
+                  Mark as duplicate of this
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      {confirm && (
+        <Dialog
+          title={`Mark ${d.ticket.key} as a duplicate?`}
+          onClose={() => setConfirm(null)}
+          footer={
+            <>
+              <button type="button" onClick={() => setConfirm(null)}>
+                Cancel
+              </button>
+              <button type="button" className="primary" onClick={() => mark.mutate(confirm)} disabled={mark.isPending}>
+                Mark as duplicate
+              </button>
+            </>
+          }
+        >
+          <p style={{ margin: 0 }}>
+            {d.ticket.key} gets the status Duplicate and links to {confirm.key} ({confirm.title}). Follow-up happens on {confirm.key}.
+          </p>
+        </Dialog>
+      )}
+    </section>
+  );
+}
+
+const str = (v: unknown) => (typeof v === 'string' ? v : '');
+
+function describe(e: TicketEventView, typeLabel: (id: string) => string, userName: (id: unknown) => string): ReactNode {
   const d = e.data as Record<string, unknown>;
   switch (e.kind) {
     case 'created':
@@ -383,12 +603,46 @@ function describe(e: TicketEventView, typeLabel: (id: string) => string, userNam
       return `Public link created for the ${String(d.attachment)}${d.integration ? ` (for ${String(d.integration)})` : ''}`;
     case 'share_link_revoked':
       return 'Public link revoked';
+    case 'external_status_changed': {
+      const by = str(d.author) ? ` by @${str(d.author)}` : '';
+      if (d.state !== 'closed') return `Reopened on GitHub${by}`;
+      const reason = d.stateReason === 'not_planned' ? ' as not planned' : d.stateReason === 'duplicate' ? ' as a duplicate' : '';
+      return `Closed on GitHub${by}${reason}`;
+    }
+    case 'external_comment':
+      return 'commented on GitHub';
+    case 'notification_sent':
+      return `Emailed the ${str(d.to) || 'recipient'}${str(d.email) ? ` (${str(d.email)})` : ''}`;
+    case 'notification_failed':
+      return `Couldn't email the ${str(d.to) || 'recipient'}${str(d.email) ? ` (${str(d.email)})` : ''}${str(d.error) ? `: ${str(d.error)}` : ''}`;
+    case 'duplicate_marked':
+      return (
+        <>
+          Marked as a duplicate of{' '}
+          {str(d.duplicateOfId) ? (
+            <Link href={`/tickets/${str(d.duplicateOfId)}`} className="mono">
+              {str(d.key) || 'another ticket'}
+            </Link>
+          ) : (
+            str(d.key) || 'another ticket'
+          )}
+        </>
+      );
     default:
       return e.kind;
   }
 }
 
-function Timeline({ events, typeLabel, users }: { events: TicketEventView[]; typeLabel: (id: string) => string; users: { id: string; name: string | null; email: string }[] }) {
+function actorName(e: TicketEventView): string {
+  if (e.kind === 'external_comment') return str(e.data.author) ? `@${str(e.data.author)}` : 'GitHub';
+  if (e.kind === 'external_status_changed') return 'GitHub';
+  if (e.actor.type === 'user') return e.actor.name ?? 'Someone';
+  if (e.actor.type === 'sdk') return 'Device';
+  if (e.actor.type === 'integration') return 'Integration';
+  return 'Snitch';
+}
+
+function ActivityList({ events, typeLabel, users }: { events: TicketEventView[]; typeLabel: (id: string) => string; users: { id: string; name: string | null; email: string }[] }) {
   const userName = (id: unknown) => {
     const u = users.find((x) => x.id === id);
     return u ? (u.name ?? u.email) : 'someone';
@@ -396,8 +650,9 @@ function Timeline({ events, typeLabel, users }: { events: TicketEventView[]; typ
   return (
     <ul className="timeline">
       {events.map((e) => {
-        const who = e.actor.type === 'user' ? (e.actor.name ?? 'Someone') : e.actor.type === 'sdk' ? 'Device' : e.actor.type === 'integration' ? 'Integration' : 'Snitch';
+        const who = actorName(e);
         const url = typeof e.data.url === 'string' ? e.data.url : null;
+        const body = e.kind === 'comment' || e.kind === 'external_comment' ? str(e.data.body) : null;
         return (
           <li key={e.id}>
             <Avatar name={who} />
@@ -416,7 +671,7 @@ function Timeline({ events, typeLabel, users }: { events: TicketEventView[]; typ
               <div className="when" title={dateTime(e.createdAt)}>
                 {relativeTime(e.createdAt)}
               </div>
-              {e.kind === 'comment' && <div className="comment-body">{String(e.data.body ?? '')}</div>}
+              {body !== null && <div className={`comment-body${e.kind === 'external_comment' ? ' external' : ''}`}>{body}</div>}
             </div>
           </li>
         );

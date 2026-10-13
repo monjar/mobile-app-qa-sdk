@@ -62,9 +62,44 @@ describe('applyIosInfoPlist', () => {
     ]);
   });
 
+  it('writes the timeline and crash options after the others, and only when set', () => {
+    const out = applyIosInfoPlist(
+      {},
+      resolve({ showTesterNotice: true, captureConsole: false, captureNetwork: true, trackScreens: false, crashPrompt: false, checkInWhenInactive: true }),
+    );
+    expect(out.Snitch).toEqual({
+      ServerURL: SERVER_URL,
+      IngestKey: INGEST_KEY,
+      ShowTesterNotice: true,
+      CaptureConsole: false,
+      CaptureNetwork: true,
+      TrackScreens: false,
+      CrashPrompt: false,
+      CheckInWhenInactive: true,
+    });
+    expect(Object.keys(out.Snitch as object)).toEqual([
+      'ServerURL',
+      'IngestKey',
+      'ShowTesterNotice',
+      'CaptureConsole',
+      'CaptureNetwork',
+      'TrackScreens',
+      'CrashPrompt',
+      'CheckInWhenInactive',
+    ]);
+    expect(applyIosInfoPlist({}, resolve({ captureNetwork: true })).Snitch).toEqual({
+      ServerURL: SERVER_URL,
+      IngestKey: INGEST_KEY,
+      CaptureNetwork: true,
+    });
+  });
+
   it('serialises to the plist types the native side reads (bool, integer, array of strings)', () => {
-    const xml = plist.build(applyIosInfoPlist({}, resolve({ enabled: false, videoMaxSeconds: 5, enabledReleaseTypes: ['debug'] })));
+    const xml = plist.build(
+      applyIosInfoPlist({}, resolve({ enabled: false, videoMaxSeconds: 5, enabledReleaseTypes: ['debug'], captureNetwork: true })),
+    );
     expect(xml).toMatch(/<key>Enabled<\/key>\s*<false\/>/);
+    expect(xml).toMatch(/<key>CaptureNetwork<\/key>\s*<true\/>/);
     expect(xml).toMatch(/<key>VideoMaxSeconds<\/key>\s*<integer>5<\/integer>/);
     expect(xml).toMatch(/<key>EnabledReleaseTypes<\/key>\s*<array>\s*<string>debug<\/string>\s*<\/array>/);
     expect(xml).toMatch(/<key>ServerURL<\/key>\s*<string>https:\/\/snitch\.example\.com<\/string>/);

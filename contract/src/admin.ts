@@ -38,6 +38,13 @@ export interface Me {
   csrfToken: string;
 }
 
+/** GET /auth/providers — which sign-in methods the login page offers. */
+export interface AuthProviders {
+  password: true;
+  /** Sign in with GitHub (OAuth app configured through SNITCH_GITHUB_CLIENT_ID / _SECRET). */
+  github: boolean;
+}
+
 export const LoginRequest = z.object({
   email: z.email().max(254),
   password: z.string().min(1).max(512),
@@ -78,6 +85,10 @@ export interface ProjectView {
   allowedAppIds: string[] | null;
   allowedReleaseTypes: ReleaseType[];
   retentionDays: number | null;
+  /** Email a member when a ticket is assigned to them (needs SMTP). */
+  notifyAssignees: boolean;
+  /** Email the tester who left an address when their ticket is resolved, with the build it's fixed in. */
+  notifyReporters: boolean;
   createdAt: number;
   openTickets: number;
 }
@@ -96,6 +107,8 @@ export const ProjectUpdate = z
     allowedAppIds: z.array(z.string().min(1).max(255)).max(20).nullable(),
     allowedReleaseTypes: z.array(ReleaseType),
     retentionDays: z.number().int().min(1).max(3650).nullable(),
+    notifyAssignees: z.boolean(),
+    notifyReporters: z.boolean(),
   })
   .partial();
 export type ProjectUpdate = z.infer<typeof ProjectUpdate>;
@@ -136,6 +149,60 @@ export interface SdkConfigView {
 }
 export type { SdkConfigOverride };
 
+// ── Devices (SDK check-ins) ─────────────────────────────────────────────────
+
+/** One install, from the config fetches its SDK made (feature `checkin`). */
+export interface DeviceView {
+  installId: string;
+  platform: Platform;
+  releaseType: ReleaseType;
+  appId: string | null;
+  appVersion: string | null;
+  build: string | null;
+  os: string | null;
+  model: string | null;
+  sdkVersion: string | null;
+  wrapper: string | null;
+  /** Release-type detection signals, `key=value;…` (docs/sdk-spec.md §3.1). */
+  signals: string | null;
+  /** false: the SDK stayed inert (an opt-in `unknown` ping). */
+  active: boolean;
+  health: 'ok' | 'crashloop' | null;
+  /** Whether the config this install last received had Snitch enabled. */
+  configEnabled: boolean;
+  firstSeenAt: number;
+  lastSeenAt: number;
+  checkins: number;
+  reports: number;
+}
+
+/** Installs seen per app build, so a build whose SDK never checked in stands out. */
+export interface BuildView {
+  platform: Platform;
+  appVersion: string;
+  build: string;
+  installs: number;
+  /** Installs per detected release type. */
+  releaseTypes: Partial<Record<ReleaseType, number>>;
+  inactive: number;
+  reports: number;
+  lastSeenAt: number;
+}
+
+export interface DeviceList {
+  items: DeviceView[];
+  builds: BuildView[];
+}
+
+export const DeviceListQuery = z.object({
+  platform: Platform.optional(),
+  releaseType: ReleaseType.optional(),
+  /** Only installs seen within this many days. */
+  sinceDays: z.coerce.number().int().min(1).max(365).optional(),
+  limit: z.coerce.number().int().min(1).max(500).optional(),
+});
+export type DeviceListQuery = z.infer<typeof DeviceListQuery>;
+
 // ── Tickets ─────────────────────────────────────────────────────────────────
 
 export interface PersonRef {
@@ -169,6 +236,10 @@ export interface TicketSummary {
   osVersion: string;
   hasScreenshot: boolean;
   videoSeconds: number | null;
+  /** The screen the report came from, when the SDK knew it. */
+  screen: string | null;
+  /** The build a fix shipped in, set when resolving. */
+  fixedIn: string | null;
   reporterEmail: string | null;
   assignee: PersonRef | null;
   escalations: EscalationBadge[];
@@ -232,6 +303,16 @@ export const TICKET_EVENT_KINDS = [
   'escalation_failed',
   'share_link_created',
   'share_link_revoked',
+  /** The linked GitHub issue was closed or reopened; data: { integrationId, state, stateReason?, url, author? }. */
+  'external_status_changed',
+  /** A comment on the linked GitHub issue; data: { integrationId, body, author, url, externalId }. */
+  'external_comment',
+  /** An email went out; data: { to: 'assignee' | 'reporter', email }. */
+  'notification_sent',
+  /** data: { to, email, error }. */
+  'notification_failed',
+  /** The ticket was marked a duplicate; data: { duplicateOfId, key }. */
+  'duplicate_marked',
 ] as const;
 export type TicketEventKind = (typeof TICKET_EVENT_KINDS)[number];
 
@@ -274,6 +355,20 @@ export interface TicketDetail {
   escalations: EscalationView[];
   /** Integrations routing rules suggest for this ticket's type, not yet escalated to. */
   suggestedIntegrationIds: string[];
+  /** Open tickets that look like the same problem, best first. */
+  similar: SimilarTicketView[];
+}
+
+export interface SimilarTicketView {
+  id: string;
+  key: string;
+  title: string;
+  status: TicketStatus;
+  createdAt: number;
+  /** 0–1. */
+  score: number;
+  /** Why it matched, e.g. "same screen", "same app version", "similar description". */
+  reasons: string[];
 }
 
 export const TicketPatch = z
@@ -283,6 +378,7 @@ export const TicketPatch = z
     type: z.string().regex(REPORT_TYPE_ID),
     title: z.string().min(1).max(200),
     duplicateOfId: z.string().nullable(),
+    fixedIn: z.string().trim().min(1).max(64).nullable(),
   })
   .partial();
 export type TicketPatch = z.infer<typeof TicketPatch>;
@@ -308,6 +404,13 @@ export const GithubConfig = z.object({
   shareTtlDays: z.number().int().min(1).max(365).default(30),
   /** Override for GitHub Enterprise; defaults to https://api.github.com. */
   apiBaseUrl: z.url().optional(),
+  /**
+   * Two-way status: resolving / won't-fix / duplicate in Snitch closes the issue, reopening
+   * reopens it; closing or reopening the issue on GitHub updates the ticket (needs the webhook).
+   */
+  syncStatus: z.boolean().default(false),
+  /** Two-way comments: Snitch comments are posted to the issue; issue comments appear on the ticket (needs the webhook). */
+  syncComments: z.boolean().default(false),
 });
 export type GithubConfig = z.infer<typeof GithubConfig>;
 
@@ -355,8 +458,16 @@ export interface IntegrationView {
   config: GithubConfig | EmailConfig | WebhookConfig;
   hasSecret: boolean;
   enabled: boolean;
+  /** GitHub only: where GitHub should send issue events, and whether a webhook secret exists. */
+  webhook: { url: string; configured: boolean } | null;
   createdAt: number;
   updatedAt: number;
+}
+
+/** POST /integrations/:id/webhook-secret — a new signing secret, shown once. */
+export interface WebhookSecretCreated {
+  url: string;
+  secret: string;
 }
 
 export const ROUTING_MODES = ['auto', 'suggest'] as const;
@@ -402,9 +513,24 @@ export interface AuditEntryView {
   createdAt: number;
 }
 
+export interface BackupStatus {
+  /** SNITCH_BACKUP_INTERVAL_HOURS > 0. */
+  enabled: boolean;
+  intervalHours: number;
+  keep: number;
+  /** `s3`: SNITCH_BACKUP_S3_* bucket; `storage`: the blob store under backups/ (same disk when it's fs). */
+  target: 's3' | 'storage';
+  lastAt: number | null;
+  lastKey: string | null;
+  lastBytes: number | null;
+  lastError: string | null;
+}
+
 export interface ServerInfo {
   version: string;
   publicUrl: string;
   storage: 'fs' | 's3';
   mail: 'smtp' | 'console';
+  backup: BackupStatus;
+  features: string[];
 }

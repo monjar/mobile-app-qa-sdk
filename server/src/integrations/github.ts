@@ -12,6 +12,7 @@ import type { TicketRow } from '../repo/tickets';
 import { buildTicketContext } from './context';
 import { classifyHttp, SendError } from './errors';
 import { GITHUB_MARKER, githubIssue } from './render';
+import { loadBeforeReport } from './timeline';
 import { VERSION } from '../version';
 
 export interface SendResult {
@@ -19,7 +20,7 @@ export interface SendResult {
   externalUrl: string | null;
 }
 
-function headers(token: string): Record<string, string> {
+export function githubHeaders(token: string): Record<string, string> {
   return {
     authorization: `Bearer ${token}`,
     accept: 'application/vnd.github+json',
@@ -29,24 +30,33 @@ function headers(token: string): Record<string, string> {
   };
 }
 
+export function githubApiBase(cfg: GithubConfig): string {
+  return (cfg.apiBaseUrl ?? 'https://api.github.com').replace(/\/+$/, '');
+}
+
+export function githubRepoPath(cfg: GithubConfig): string {
+  return `/repos/${encodeURIComponent(cfg.owner)}/${encodeURIComponent(cfg.repo)}`;
+}
+
 export async function sendGithub(deps: Deps, integration: IntegrationRow, ticket: TicketRow, userId: string | null): Promise<SendResult> {
   const cfg = GithubConfig.parse(JSON.parse(integration.config_json));
   const token = deps.integrations.secret(integration);
   if (!token) throw new SendError('GitHub integration has no token', false);
-  const api = (cfg.apiBaseUrl ?? 'https://api.github.com').replace(/\/+$/, '');
-  const repoPath = `/repos/${encodeURIComponent(cfg.owner)}/${encodeURIComponent(cfg.repo)}`;
+  const api = githubApiBase(cfg);
+  const repoPath = githubRepoPath(cfg);
 
   const existing = await findExisting(deps, api, cfg.owner, cfg.repo, token, ticket.id);
   if (existing) return existing;
 
   const ctx = buildTicketContext(deps, ticket, { enabled: cfg.includeShareLinks, ttlDays: cfg.shareTtlDays, userId, integration });
+  ctx.render.beforeReport = await loadBeforeReport(deps, ticket, ctx.attachments);
   const { title, body } = githubIssue(ctx.render);
   const labels = [...new Set([...cfg.labels, `type:${ticket.type}`])];
   let res: Response;
   try {
     res = await deps.fetch(`${api}${repoPath}/issues`, {
       method: 'POST',
-      headers: headers(token),
+      headers: githubHeaders(token),
       body: JSON.stringify({ title, body, labels, ...(cfg.assignees.length ? { assignees: cfg.assignees } : {}) }),
       signal: AbortSignal.timeout(20_000),
     });
@@ -59,7 +69,7 @@ export async function sendGithub(deps: Deps, integration: IntegrationRow, ticket
     if (res.status === 422 && /label|assignee/i.test(text)) {
       const retry = await deps.fetch(`${api}${repoPath}/issues`, {
         method: 'POST',
-        headers: headers(token),
+        headers: githubHeaders(token),
         body: JSON.stringify({ title, body }),
         signal: AbortSignal.timeout(20_000),
       });
@@ -81,7 +91,7 @@ function parseIssue(text: string): SendResult {
 async function findExisting(deps: Deps, api: string, owner: string, repo: string, token: string, ticketId: string): Promise<SendResult | null> {
   try {
     const q = encodeURIComponent(`repo:${owner}/${repo} "snitch:ticket=${ticketId}" in:body is:issue`);
-    const res = await deps.fetch(`${api}/search/issues?q=${q}&per_page=1`, { headers: headers(token), signal: AbortSignal.timeout(10_000) });
+    const res = await deps.fetch(`${api}/search/issues?q=${q}&per_page=1`, { headers: githubHeaders(token), signal: AbortSignal.timeout(10_000) });
     if (!res.ok) return null;
     const data = (await res.json()) as { items?: { number: number; html_url: string; body?: string }[] };
     const hit = data.items?.find((i) => i.body?.includes(GITHUB_MARKER(ticketId)));
@@ -96,9 +106,8 @@ export async function testGithub(deps: Deps, integration: IntegrationRow): Promi
   const cfg = GithubConfig.parse(JSON.parse(integration.config_json));
   const token = deps.integrations.secret(integration);
   if (!token) throw new SendError('No token configured', false);
-  const api = (cfg.apiBaseUrl ?? 'https://api.github.com').replace(/\/+$/, '');
-  const res = await deps.fetch(`${api}/repos/${encodeURIComponent(cfg.owner)}/${encodeURIComponent(cfg.repo)}`, {
-    headers: headers(token),
+  const res = await deps.fetch(`${githubApiBase(cfg)}${githubRepoPath(cfg)}`, {
+    headers: githubHeaders(token),
     signal: AbortSignal.timeout(10_000),
   });
   const text = await res.text();

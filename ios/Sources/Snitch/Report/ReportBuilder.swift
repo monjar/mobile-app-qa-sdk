@@ -6,6 +6,13 @@
 // Values are clamped to the contract's limits here, because a 422 makes the
 // uploader drop the report — a typo in the email field must not cost the tester
 // their report.
+//
+// 0.3 attachments: `timeline` (application/x-ndjson, spec §11.3) from the snapshot
+// frozen with the capture, finished here — the unified-log lines are read now, on
+// the report queue, and meta.videoStart/videoEnd come from the clip just composed —
+// and `crash` (text/plain, spec §11.8), the saved diagnostic of a crash follow-up.
+// Every report carries the timeline: servers since 0.1 accept application/x-ndjson,
+// so it doesn't wait for the first config fetch to confirm the `timeline` feature.
 
 import Foundation
 
@@ -25,6 +32,14 @@ struct ReportContext {
     var wrapper: UserContext.Wrapper?
     var stats: CaptureStatsBody?
     var logText: String?
+    /// The check-in installId.
+    var installId: String? = nil
+    /// The screen showing when the sheet opened.
+    var screen: String? = nil
+    /// Written as the `timeline` attachment.
+    var timeline: TimelineSnapshot? = nil
+    /// Written as the `crash` attachment (crash follow-up).
+    var crashText: String? = nil
 }
 
 struct VideoRequest {
@@ -37,7 +52,10 @@ enum ReportBuilder {
         "image/jpeg": 8 * 1024 * 1024,
         "video/mp4": 30 * 1024 * 1024,
         "text/plain": 2 * 1024 * 1024,
+        "application/x-ndjson": TimelineLimits.maxBytes,
     ]
+    /// The saved crash diagnostic is cut to this many bytes (spec §11.8).
+    static let crashTextMaxBytes = 512 * 1024
 
     static func newReportId() -> String {
         UUID().uuidString.lowercased()
@@ -82,6 +100,8 @@ enum ReportBuilder {
             sdk: sdk,
             custom: custom.isEmpty ? nil : custom,
             stats: stats,
+            screen: TimelineText.field(context.screen, maxUTF16: TimelineLimits.screenChars),
+            installId: context.installId.flatMap { InstallId.isValid($0) ? $0 : nil },
             attachments: attachments
         )
     }
@@ -107,6 +127,8 @@ enum ReportBuilder {
             ))
         }
 
+        /// The composed clip's monotonic end and length, for the timeline's meta.
+        var clip: (endT: Double, durationMs: Int)?
         if let video = video {
             let started = Clock.nowMs()
             let url = dir.appendingPathComponent(Outbox.fileName(for: "video"))
@@ -130,6 +152,7 @@ enum ReportBuilder {
                     width: result.width, height: result.height,
                     durationMs: min(result.durationMs, 31_000)
                 ))
+                clip = (video.frozen.endT, min(result.durationMs, 31_000))
             } catch {
                 SDKLog.warn("Composing the video failed (\(error)); sending the report without it")
                 try? FileManager.default.removeItem(at: url)
@@ -150,8 +173,60 @@ enum ReportBuilder {
             ))
         }
 
+        if let timeline = context.timeline,
+           let declaration = try writeTimeline(timeline, clip: clip, in: dir, outbox: outbox) {
+            attachments.append(declaration)
+        }
+
+        if let text = context.crashText, !text.isEmpty {
+            var data = Data(text.utf8)
+            if data.count > crashTextMaxBytes { data = data.prefix(crashTextMaxBytes) }
+            let url = dir.appendingPathComponent(Outbox.fileName(for: "crash"))
+            try outbox.write(data, to: url)
+            attachments.append(AttachmentDeclaration(
+                name: "crash", contentType: "text/plain", sizeBytes: data.count,
+                sha256: Hashing.sha256Hex(data), width: nil, height: nil, durationMs: nil
+            ))
+        }
+
         let report = makeReport(context: context, attachments: attachments, stats: stats)
         try outbox.commit(report, in: dir)
         return dir
+    }
+
+    /// Finishes the frozen timeline (unified-log lines, video span) and writes it; nil when
+    /// there is nothing to show.
+    static func writeTimeline(
+        _ timeline: TimelineSnapshot,
+        clip: (endT: Double, durationMs: Int)?,
+        in dir: URL,
+        outbox: Outbox
+    ) throws -> AttachmentDeclaration? {
+        var events = timeline.events
+        if let console = timeline.nativeConsole {
+            events += ConsoleReader.entries(console)
+        }
+        guard !events.isEmpty else { return nil }
+        let span = clip.map { timelineVideoSpan(endT: $0.endT, durationMs: $0.durationMs, monoToWallMs: timeline.monoToWallMs) }
+        let document = TimelineEncoding.document(
+            events: events,
+            end: timeline.end,
+            videoStart: span?.start,
+            videoEnd: span?.end,
+            dropped: timeline.dropped
+        )
+        guard document.eventCount > 0, document.data.count <= TimelineLimits.maxBytes else { return nil }
+        let url = dir.appendingPathComponent(Outbox.fileName(for: "timeline"))
+        try outbox.write(document.data, to: url)
+        return AttachmentDeclaration(
+            name: "timeline", contentType: "application/x-ndjson", sizeBytes: document.data.count,
+            sha256: Hashing.sha256Hex(document.data), width: nil, height: nil, durationMs: nil
+        )
+    }
+
+    /// meta.videoEnd = wall(endT), videoStart = videoEnd − durationMs (spec §11.3).
+    static func timelineVideoSpan(endT: Double, durationMs: Int, monoToWallMs: Double) -> (start: Int64, end: Int64) {
+        let end = Int64((endT + monoToWallMs).rounded())
+        return (start: max(0, end - Int64(durationMs)), end: end)
     }
 }

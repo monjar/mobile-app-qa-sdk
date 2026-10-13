@@ -1,6 +1,8 @@
 // :snitch — the core SDK. No dependencies beyond the Kotlin stdlib, no
 // resources (strings live in ui/Strings.kt) so the same sources can be compiled
-// inside the React Native module.
+// inside the React Native module. OkHttp is compileOnly: only
+// network/SnitchOkHttpInterceptor uses it, and that class is loaded only by apps
+// that add it to their own OkHttp client; it never appears in the published POM.
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
@@ -45,9 +47,12 @@ android {
 }
 
 dependencies {
+    compileOnly(libs.okhttp)
     testImplementation(libs.junit4)
     // The JVM unit tests need a real org.json (android.jar only has stubs).
     testImplementation(libs.json)
+    // SnitchOkHttpInterceptorTest runs the interceptor in a real OkHttp client.
+    testImplementation(libs.okhttp)
 }
 
 // SnitchVersion.kt hard-codes the version (no BuildConfig: the RN module compiles

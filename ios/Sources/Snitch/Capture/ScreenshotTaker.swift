@@ -32,6 +32,8 @@ struct Screenshot {
     var width: Int
     var height: Int
     var thumbnail: UIImage?
+    /// Image pixels per screen point (the screen scale it was taken at).
+    var scale: CGFloat = 1
 }
 
 enum ScreenshotTaker {
@@ -60,7 +62,17 @@ enum ScreenshotTaker {
         guard let cgImage = image.cgImage, let jpeg = ImageCoding.jpegData(cgImage, quality: jpegQuality) else {
             return nil
         }
-        let thumb = image.preparingThumbnail(of: CGSize(width: 44 * scale, height: 88 * scale))
-        return Screenshot(jpeg: jpeg, width: cgImage.width, height: cgImage.height, thumbnail: thumb ?? image)
+        return Screenshot(
+            jpeg: jpeg, width: cgImage.width, height: cgImage.height,
+            thumbnail: thumbnail(of: image, scale: scale), scale: scale
+        )
+    }
+
+    /// The sheet's thumbnail (Theme.thumbnailSize) of a screenshot image.
+    static func thumbnail(of image: UIImage, scale: CGFloat) -> UIImage {
+        image.preparingThumbnail(of: CGSize(
+            width: Theme.thumbnailSize.width * scale,
+            height: Theme.thumbnailSize.height * scale
+        )) ?? image
     }
 }

@@ -3,7 +3,8 @@
  *
  * Sources, later wins per field:
  *   1. manifest meta-data io.github.monjar.snitch.DEBUG_SERVER_URL, DEBUG_INGEST_KEY,
- *      DEBUG_AUTOREPORT (s), DEBUG_CANCEL_AFTER_MS, DEBUG_SHOW_ON_LAUNCH
+ *      DEBUG_AUTOREPORT (s), DEBUG_CANCEL_AFTER_MS, DEBUG_SHOW_ON_LAUNCH,
+ *      DEBUG_CHUNK_BYTES (SNITCH_DEBUG_CHUNK_BYTES, §11.10)
  *   2. Snitch.debugOverrides(SnitchDebugOverrides(...)) — the instrumentation-friendly
  *      setter; works before start or at any time after it.
  * Android has no equivalent of the iOS process environment for an installed app,
@@ -25,6 +26,7 @@ internal object DebugHooks {
             autoReportAfterSeconds = override.autoReportAfterSeconds ?: base.autoReportAfterSeconds,
             cancelAfterMs = override.cancelAfterMs ?: base.cancelAfterMs,
             showOnLaunch = override.showOnLaunch || base.showOnLaunch,
+            chunkBytes = override.chunkBytes ?: base.chunkBytes,
         )
     }
 

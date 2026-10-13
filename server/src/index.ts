@@ -29,7 +29,14 @@ async function main(): Promise<void> {
   deps.wake = worker.poke;
   const app = buildApp(deps);
   const server = serve({ fetch: app.fetch, port: config.port, hostname: config.host }, (info) => {
-    log.info('boot', `Snitch ${VERSION} listening`, { port: info.port, publicUrl: config.publicUrl, storage: deps.blobs.kind, mail: deps.mailer.driver });
+    log.info('boot', `Snitch ${VERSION} listening`, {
+      port: info.port,
+      publicUrl: config.publicUrl,
+      storage: deps.blobs.kind,
+      mail: deps.mailer.driver,
+      backups: config.backup.intervalHours > 0 ? `every ${config.backup.intervalHours} h to ${config.backup.s3 ? 'the backup bucket' : 'the blob store'}` : 'off',
+      githubSignIn: config.githubAuth !== null,
+    });
   });
 
   let closing = false;

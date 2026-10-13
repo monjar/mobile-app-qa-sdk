@@ -37,19 +37,33 @@ A behaviour change starts with a vector.
    - opens the sheet in its own window above the app.
 2. **Report.** The tester picks a type, writes a description and chooses attachments. On Send:
    - the clip is composed from the frozen frames into H.264 MP4,
+   - the timeline (log lines, request summaries, screens, touches and app events from RAM rings, frozen with the
+     frames) is written as `timeline.ndjson` with the clip's wall-clock span, so the dashboard can line both up,
    - everything is written to the outbox,
    - the sheet closes immediately.
 3. **Upload** goes through the outbox, one report at a time, and survives restarts:
    1. `POST /reports` (idempotent on a client UUID).
    2. `PUT /reports/:id/attachments/:name` for each attachment. Raw bytes are streamed to disk on the server and
-      checked against the declared length, SHA-256 and magic number.
+      checked against the declared length, SHA-256 and magic number. Servers that advertise `resumable-upload` take
+      large files in `Content-Range` chunks (1 MiB by default); the outbox records the confirmed offset, so a dropped
+      connection or a killed app resumes from the last chunk instead of from zero.
    3. `POST /reports/:id/complete`.
 
    Network errors and 5xx/429 responses back off from 30 s up to 1 h. 4xx responses drop the report.
 4. **Ticket.** The server numbers it (`MOCH-42`), logs `created`/`completed` events, and queues a `route_ticket` job.
    Routing rules either queue escalations or suggest them on the ticket.
 5. **Triage.** Developers change status, assign, comment and escalate from the dashboard. Every change is an event on
-   the ticket. Admin actions also go to the audit log.
+   the ticket. Admin actions also go to the audit log. The ticket page suggests likely duplicates (description,
+   screen and build). A GitHub escalation can sync both ways through a signed webhook: closing the issue resolves
+   the ticket, resolving the ticket closes the issue, and comments are mirrored. Assignees, and optionally the tester,
+   get an email when it matters.
+
+## Check-ins
+
+Every config fetch of an active SDK carries a random install id, the app and SDK versions and the release-type
+signals. The server keeps the latest per install, which the Devices page turns into "which builds have Snitch
+running, as what release type". A build that should report but never appears there points at a detection or
+configuration problem; the signals of a misdetected install can be copied straight into a test vector.
 
 ## Continuous recording: the trade-offs
 

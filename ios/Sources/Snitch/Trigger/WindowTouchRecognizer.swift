@@ -37,6 +37,11 @@ final class WindowTouchRecognizer: UIGestureRecognizer, UIGestureRecognizerDeleg
     private var tickTimer: Timer?
     private var debugTimer: Timer?
 
+    /// Fingers currently down in this window (the timeline's touch `n`).
+    var activeTouchCount: Int {
+        trackedTouches.count
+    }
+
     /// Convenience so the inherited designated initializers (incl. any coder init) stay untouched.
     convenience init(host: WindowTouchRecognizerHost) {
         self.init(target: nil, action: nil)

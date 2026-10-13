@@ -54,6 +54,13 @@ export const patch = <T>(path: string, body: unknown) => api<T>(path, { method: 
 export const put = <T>(path: string, body: unknown) => api<T>(path, { method: 'PUT', body });
 export const del = <T>(path: string) => api<T>(path, { method: 'DELETE' });
 
+/** An attachment's body as text (same-origin, cookie-authenticated). */
+export async function fetchText(url: string): Promise<string> {
+  const res = await fetch(url, { credentials: 'same-origin' });
+  if (!res.ok) throw new ApiError(res.status, 'internal', `Couldn't load the file (${res.status})`);
+  return res.text();
+}
+
 export function errorText(e: unknown): string {
   if (e instanceof ApiError) {
     const details = Array.isArray(e.details)

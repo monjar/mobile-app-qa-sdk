@@ -56,11 +56,13 @@ final class ProvisioningProfileTests: XCTestCase {
         XCTAssertEqual(classify(signals), .unknown)
     }
 
-    func testGarbageFailsClosed() {
+    func testGarbageFailsClosed() throws {
         let garbage = Data([0x30, 0x82, 0x00, 0x10, 0x3C, 0x3F, 0x78, 0x00, 0x01, 0x02])
         let signals = ProvisioningProfileParser.parse(garbage)
-        XCTAssertEqual(signals, ProvisioningProfileSignals(getTaskAllow: false, provisionsAllDevices: false, provisionedDeviceCount: 0))
+        XCTAssertEqual(signals, ProvisioningProfileSignals(getTaskAllow: false, provisionsAllDevices: false, provisionedDeviceCount: 0, readable: false))
         XCTAssertEqual(classify(signals), .unknown)
+        XCTAssertFalse(ProvisioningProfileParser.parse(Data()).readable)
+        XCTAssertTrue(ProvisioningProfileParser.parse(try profileBytes(basePlist())).readable)
         XCTAssertEqual(classify(ProvisioningProfileParser.parse(Data())), .unknown)
     }
 

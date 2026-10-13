@@ -6,6 +6,12 @@
  * up to 5 s of video, description "autoreport" — has been uploaded and
  * completed. The CI job then fetches it with scripts/ci-await-report.mjs and
  * checks the MP4 with scripts/verify-video.sh.
+ *
+ * The report also carries a timeline (spec §11.3): the app events, the screen
+ * MainActivity names ("Example"), its log line and this test's, its one
+ * request (localhost:8080/health), the taps below and this process's logcat.
+ * The CI server takes chunks of 64 KiB, so the screenshot and the video go up
+ * as resumable chunked uploads (spec §11.2).
  */
 package io.github.monjar.snitch.example
 

@@ -3,6 +3,11 @@
  * noBackupFilesDir/snitch/outbox/<clientReportId>/ holding the attachments,
  * `report.json` (the ReportCreate body) and `state.json` (upload progress).
  *
+ * state.json: {reportId?, ticket?, attempts, nextAttemptAt, uploaded: [names]},
+ * plus for chunked uploads (spec §11.2) `resumable`, `chunkBytes`, `offsets`
+ * ({name: bytes the server has}) and `restarts` (whole-file hash failures).
+ * Files written before 0.3 lack those and load with the defaults.
+ *
  * A directory is only eligible for upload once report.json exists, and
  * report.json is written last and atomically (temp file + rename), so a crash
  * mid-write never uploads half a report. Caps: 10 reports or 100 MB — the
@@ -20,6 +25,14 @@ internal class OutboxState(
     var attempts: Int = 0,
     var nextAttemptAt: Long = 0,
     val uploaded: MutableSet<String> = LinkedHashSet(),
+    /** The create response's `upload.resumable`. */
+    var resumable: Boolean = false,
+    /** The server's preferred chunk size, clamped to the contract bounds; 0 when not resumable. */
+    var chunkBytes: Long = 0,
+    /** Bytes of each partly uploaded attachment the server has. */
+    val offsets: MutableMap<String, Long> = LinkedHashMap(),
+    /** Whole-file hash failures of chunked uploads; the second drops the report. */
+    var restarts: Int = 0,
 ) {
     fun toJson(): JSONObject {
         val o = JSONObject()
@@ -30,6 +43,12 @@ internal class OutboxState(
         val arr = JSONArray()
         uploaded.forEach { arr.put(it) }
         o.put("uploaded", arr)
+        o.put("resumable", resumable)
+        if (chunkBytes > 0) o.put("chunkBytes", chunkBytes)
+        val off = JSONObject()
+        offsets.forEach { (name, bytes) -> off.put(name, bytes) }
+        o.put("offsets", off)
+        if (restarts > 0) o.put("restarts", restarts)
         return o
     }
 
@@ -37,12 +56,20 @@ internal class OutboxState(
         fun fromJson(o: JSONObject): OutboxState {
             val uploaded = LinkedHashSet<String>()
             o.optJSONArray("uploaded")?.let { arr -> for (i in 0 until arr.length()) uploaded.add(arr.getString(i)) }
+            val offsets = LinkedHashMap<String, Long>()
+            o.optJSONObject("offsets")?.let { off ->
+                for (name in off.keys()) off.optLong(name, -1).takeIf { it >= 0 }?.let { offsets[name] = it }
+            }
             return OutboxState(
                 reportId = if (o.isNull("reportId")) null else o.optString("reportId").ifEmpty { null },
                 ticket = if (o.isNull("ticket")) null else o.optString("ticket").ifEmpty { null },
                 attempts = o.optInt("attempts", 0),
                 nextAttemptAt = o.optLong("nextAttemptAt", 0),
                 uploaded = uploaded,
+                resumable = o.optBoolean("resumable", false),
+                chunkBytes = o.optLong("chunkBytes", 0),
+                offsets = offsets,
+                restarts = o.optInt("restarts", 0),
             )
         }
     }

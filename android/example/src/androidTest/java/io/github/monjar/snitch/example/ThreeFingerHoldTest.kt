@@ -68,7 +68,9 @@ class ThreeFingerHoldTest {
     @Test
     fun aSingleLongPressStillWorks() {
         SystemClock.sleep(1100) // past the detector's cooldown from any earlier test
-        Touches.hold(listOf(Touches.centerOf(activity.rows[3])), holdMs = PressRow.LONG_PRESS_MS + 300)
+        // A full second past the row's timer: on a busy emulator (an earlier test's report may
+        // still be uploading) the main thread can run that timer a few hundred ms late.
+        Touches.hold(listOf(Touches.centerOf(activity.rows[3])), holdMs = PressRow.LONG_PRESS_MS + 1_000)
         instrumentation.waitForIdleSync()
         var longPresses = 0
         Touches.onMain(activity) { longPresses = it.longPresses }

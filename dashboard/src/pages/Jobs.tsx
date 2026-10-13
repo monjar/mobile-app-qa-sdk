@@ -1,10 +1,69 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { AuditEntryView, JobView } from '@snitch/contract';
+import type { AuditEntryView, JobView, ServerInfo } from '@snitch/contract';
 import { errorText, get, post } from '../lib/api';
-import { dateTime, relativeTime } from '../lib/format';
+import { bytes, dateTime, relativeTime } from '../lib/format';
 import { qk } from '../lib/queries';
 import { Empty, useToast } from '../components/ui';
+
+/** Version, storage, mail and backups at a glance; backups change, so this one refreshes. */
+function ServerCard() {
+  const server = useQuery({ queryKey: qk.server, queryFn: () => get<ServerInfo>('/server'), staleTime: 0, refetchInterval: 60_000 });
+  const s = server.data;
+  if (!s) return null;
+  const b = s.backup;
+  return (
+    <section className="card" style={{ marginBottom: 16 }} aria-label="Server">
+      <div className="card-header">
+        <h2>Server</h2>
+        <span className="muted small mono">v{s.version}</span>
+      </div>
+      <div className="card-body server-grid">
+        <div className="kv">
+          <span>Public URL</span>
+          <span className="mono">{s.publicUrl}</span>
+        </div>
+        <div className="kv">
+          <span>Storage</span>
+          <span>{s.storage === 's3' ? 'S3' : 'Local disk'}</span>
+        </div>
+        <div className="kv">
+          <span>Email</span>
+          <span>{s.mail === 'smtp' ? 'SMTP' : <span className="warn-text">Not configured (server log only)</span>}</span>
+        </div>
+        <div className="kv">
+          <span>Backups</span>
+          <span>
+            {b.enabled ? (
+              <>
+                Every {b.intervalHours} h to {b.target === 's3' ? 'the backup S3 bucket' : s.storage === 's3' ? 'the S3 blob store, under backups/' : 'the data volume, under backups/'}, keeping{' '}
+                {b.keep}
+              </>
+            ) : (
+              <span className="warn-text">Off (set SNITCH_BACKUP_INTERVAL_HOURS)</span>
+            )}
+          </span>
+        </div>
+        {(b.enabled || b.lastAt !== null) && (
+          <div className="kv">
+            <span>Last backup</span>
+            <span>
+              {b.lastAt === null ? (
+                'None yet'
+              ) : (
+                <>
+                  <span title={dateTime(b.lastAt)}>{relativeTime(b.lastAt)}</span> · {bytes(b.lastBytes)}
+                  {b.lastKey && <div className="mono small muted">{b.lastKey}</div>}
+                </>
+              )}
+            </span>
+          </div>
+        )}
+        {b.lastError && <div className="notice danger small">Last backup failed: {b.lastError}</div>}
+      </div>
+    </section>
+  );
+}
 
 export function Jobs() {
   const [state, setState] = useState<'dead' | 'queued' | 'running' | 'done'>('dead');
@@ -23,6 +82,7 @@ export function Jobs() {
       <div className="page-header">
         <h1>Jobs &amp; audit</h1>
       </div>
+      <ServerCard />
       <div className="tabs">
         <button type="button" className={`tab${view === 'jobs' ? ' active' : ''}`} onClick={() => setView('jobs')}>
           Background jobs

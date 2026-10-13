@@ -1,5 +1,5 @@
-// Snitch's own windows (spec §6): the report sheet, the toast, the screenshot
-// pill, the tester notice and the edge handle each live in a dedicated,
+// Snitch's own windows (spec §6): the report sheet, the toast, the prompt pill
+// (screenshot or crash), the tester notice and the edge handle each live in a dedicated,
 // scene-aware UIWindow above the app (`.alert + 0.5`/`+ 1`/`+ 2`). Recognizers
 // and capture skip every SnitchWindow.
 //
@@ -54,6 +54,7 @@ final class OverlayController {
     private var toastHide: DispatchWorkItem?
     private var pillWindow: SnitchWindow?
     private var pillHide: DispatchWorkItem?
+    private var pillKind: PillKind?
     private var noticeWindow: SnitchWindow?
     private var edgeHandleWindow: SnitchWindow?
     /// What the current edge handle was built with, so an unchanged config isn't rebuilt mid-pull.
@@ -169,38 +170,71 @@ final class OverlayController {
         }
     }
 
-    // MARK: - Screenshot pill
+    // MARK: - Prompt pill
 
-    func showPill(onTap: @escaping () -> Void) {
+    enum PillKind {
+        /// "Report this screen?" after a system screenshot.
+        case screenshot
+        /// "The app closed unexpectedly. Report it?" (has a dismiss button).
+        case crash
+    }
+
+    /// Shows a prompt pill for `duration` seconds, replacing any other. A tap hides it and
+    /// calls `onTap`; the optional dismiss button hides it and calls `onClose`; a timeout
+    /// just hides it.
+    @discardableResult
+    func showPill(
+        _ kind: PillKind,
+        title: String,
+        iconName: String,
+        duration: TimeInterval,
+        onTap: @escaping () -> Void,
+        onClose: (() -> Void)? = nil
+    ) -> Bool {
         dispatchPrecondition(condition: .onQueue(.main))
-        guard !isSheetVisible else { return }
+        guard !isSheetVisible else { return false }
         hidePill()
-        guard let made = makeWindow(levelOffset: 2, passthrough: true) else { return }
+        guard let made = makeWindow(levelOffset: 2, passthrough: true) else { return false }
         let window = made.window
         let root = made.root
-        let pill = ScreenshotPromptPill(title: Strings.screenshotPrompt) { [weak self] in
+        let close: (() -> Void)? = onClose.map { handler in
+            { [weak self] in
+                self?.hidePill()
+                handler()
+            }
+        }
+        let pill = PromptPill(title: title, iconName: iconName, onTap: { [weak self] in
             self?.hidePill()
             onTap()
-        }
+        }, onClose: close)
         pill.translatesAutoresizingMaskIntoConstraints = false
         root.view.addSubview(pill)
+        let guide = root.view.safeAreaLayoutGuide
         NSLayoutConstraint.activate([
-            pill.topAnchor.constraint(equalTo: root.view.safeAreaLayoutGuide.topAnchor, constant: 8),
+            pill.topAnchor.constraint(equalTo: guide.topAnchor, constant: 8),
             pill.centerXAnchor.constraint(equalTo: root.view.centerXAnchor),
+            pill.leadingAnchor.constraint(greaterThanOrEqualTo: guide.leadingAnchor, constant: Theme.padding),
+            pill.trailingAnchor.constraint(lessThanOrEqualTo: guide.trailingAnchor, constant: -Theme.padding),
         ])
         window.isHidden = false
         pillWindow = window
+        pillKind = kind
         let work = DispatchWorkItem { [weak self] in self?.hidePill() }
         pillHide = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + Theme.promptDuration, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: work)
+        UIAccessibility.post(notification: .announcement, argument: title)
+        return true
     }
 
-    func hidePill() {
+    /// Hides the pill; with `kind`, only a pill of that kind.
+    func hidePill(_ kind: PillKind? = nil) {
+        if let kind = kind, pillKind != kind { return }
         pillHide?.cancel()
         pillHide = nil
         pillWindow?.isHidden = true
         pillWindow?.rootViewController = nil
         pillWindow = nil
+        pillKind = nil
     }
 
     // MARK: - Tester notice

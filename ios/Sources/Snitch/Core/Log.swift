@@ -8,7 +8,9 @@ import Foundation
 import os
 
 enum SDKLog {
-    private static let logger = Logger(subsystem: "io.github.monjar.snitch", category: "Snitch")
+    /// Snitch's unified-log subsystem; the report timeline never includes its own lines.
+    static let subsystem = "io.github.monjar.snitch"
+    private static let logger = Logger(subsystem: subsystem, category: "Snitch")
     private static let lock = NSLock()
     private static var onceKeys = Set<String>()
 

@@ -27,15 +27,21 @@ internal class TestHttpServer(
 
     val port: Int get() = socket.localPort
 
-    init {
-        Thread({ acceptLoop() }, "test-http-accept").apply { isDaemon = true }.start()
+    private val acceptThread = Thread({ acceptLoop() }, "test-http-accept").apply {
+        isDaemon = true
+        start()
     }
 
+    /**
+     * Closes the socket and waits for the accept loop to end, so a request made after
+     * stop() is refused rather than possibly accepted and answered by a dying server.
+     */
     fun stop() {
         try {
             socket.close()
         } catch (_: IOException) {
         }
+        acceptThread.join(2_000)
     }
 
     private fun acceptLoop() {
@@ -125,6 +131,7 @@ internal class TestHttpServer(
     private fun reason(status: Int): String = when (status) {
         200 -> "OK"
         201 -> "Created"
+        202 -> "Accepted"
         304 -> "Not Modified"
         401 -> "Unauthorized"
         403 -> "Forbidden"

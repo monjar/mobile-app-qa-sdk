@@ -127,7 +127,10 @@ class ReportBuilderTest {
                 AttachmentDecl("screenshot", "image/jpeg", 412833, "9f2c1d0e4b7a6f5e3d2c1b0a9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e", 1080, 2400),
                 AttachmentDecl("video", "video/mp4", 1288211, "0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7", 432, 960, 15000),
                 AttachmentDecl("logs", "text/plain", 1200, "1e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7"),
+                AttachmentDecl("timeline", "application/x-ndjson", 18211, "5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b"),
             ),
+            screen = "index",
+            installId = "3d8e6c1a-2b4f-4e5d-8a9b-0c1d2e3f4a5b",
         )
         val built = keyPaths(ReportBuilder.toJson(full))
         // The iOS fixture exercises every optional field; Android adds memory.freeMB and stats.videoLost.
@@ -159,6 +162,18 @@ class ReportBuilderTest {
         assertEquals(64, o.getJSONObject("device").getString("model").length)
         assertFalse(o.getJSONObject("device").has("battery"))
         assertFalse(o.getJSONObject("device").has("network"))
+    }
+
+    @Test
+    fun `screen and installId are sent when valid`() {
+        val o = ReportBuilder.toJson(fixturePayload().copy(screen = "  Checkout  ", installId = "3D8E6C1A-2B4F-4E5D-8A9B-0C1D2E3F4A5B"))
+        assertEquals("Checkout", o.getString("screen"))
+        assertEquals("3d8e6c1a-2b4f-4e5d-8a9b-0c1d2e3f4a5b", o.getString("installId"))
+        assertEquals(200, ReportBuilder.toJson(fixturePayload().copy(screen = "s".repeat(500))).getString("screen").length)
+        val dropped = ReportBuilder.toJson(fixturePayload().copy(screen = "   ", installId = "00000000-0000-0000-0000-000000000000"))
+        assertFalse(dropped.has("screen"))
+        assertFalse(dropped.has("installId"))
+        assertTrue(ReportBuilder.isValidUuid(java.util.UUID.randomUUID().toString()))
     }
 
     @Test

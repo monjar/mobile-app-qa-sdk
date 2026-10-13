@@ -2,19 +2,27 @@
  * Team management (admin-only) plus jobs and the audit log.
  */
 import { Hono } from 'hono';
-import { JOB_STATES, UserCreate, UserUpdate, type JobState, type ServerInfo } from '@snitch/contract';
+import { JOB_STATES, SERVER_FEATURES, UserCreate, UserUpdate, type JobState, type ServerInfo } from '@snitch/contract';
 import type { Deps } from '../../deps';
 import type { AppEnv } from '../../http/env';
 import { conflict, invalid, notFound } from '../../http/errors';
 import { requireAdmin } from '../../http/session';
 import { jsonBody } from '../../http/validate';
 import { VERSION } from '../../version';
+import { backupStatus } from '../../worker/backup';
 
 export function userRoutes(deps: Deps): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
   app.get('/server', (c) =>
-    c.json({ version: VERSION, publicUrl: deps.config.publicUrl, storage: deps.blobs.kind, mail: deps.mailer.driver } satisfies ServerInfo),
+    c.json({
+      version: VERSION,
+      publicUrl: deps.config.publicUrl,
+      storage: deps.blobs.kind,
+      mail: deps.mailer.driver,
+      backup: backupStatus(deps),
+      features: [...SERVER_FEATURES],
+    } satisfies ServerInfo),
   );
 
   // Everyone can list users (to pick an assignee); only admins manage them.

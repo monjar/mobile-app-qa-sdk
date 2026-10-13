@@ -6,6 +6,10 @@
 #   fly logs | grep setup        # one-time link to create the first admin
 #
 # Optional secrets: fly secrets set SNITCH_SMTP_URL=smtps://… SNITCH_MAIL_FROM="QA <qa@example.com>"
+# Daily backups to a bucket elsewhere (recommended; volume snapshots stay on Fly):
+#   fly secrets set SNITCH_BACKUP_INTERVAL_HOURS=24 SNITCH_BACKUP_S3_ENDPOINT=https://… SNITCH_BACKUP_S3_BUCKET=… \
+#     SNITCH_BACKUP_S3_ACCESS_KEY_ID=… SNITCH_BACKUP_S3_SECRET_ACCESS_KEY=…
+# Sign in with GitHub: fly secrets set SNITCH_GITHUB_CLIENT_ID=… SNITCH_GITHUB_CLIENT_SECRET=…
 app = "mochiro-snitch"
 primary_region = "lhr"
 kill_signal = "SIGTERM"
@@ -25,12 +29,14 @@ kill_timeout = "15s"
   auto_start_machines = true
   min_machines_running = 0
 
+  # Readiness, not just liveness: the database answers and storage takes a write
+  # (a full or read-only volume fails it).
   [[http_service.checks]]
     interval = "30s"
     timeout = "5s"
     grace_period = "10s"
     method = "GET"
-    path = "/health"
+    path = "/health/ready"
 
 # SQLite + attachments live here. One machine only: Snitch is single-instance.
 [mounts]
