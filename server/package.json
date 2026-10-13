@@ -1,7 +1,7 @@
 {
   "name": "snitch-server",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Snitch server: report intake, ticket queue, admin dashboard API and escalation worker.",
   "license": "MIT",
   "type": "module",
