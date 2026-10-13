@@ -63,6 +63,21 @@ class LogcatParserTest {
     }
 
     @Test
+    fun `framework chatter is dropped below warning, its warnings and other tags stay`() {
+        val lines = listOf(
+            "1791381003.500  42  42 D OpenGLRenderer: app_time_stats: avg=56.72ms min=11.16ms max=112.02ms count=18",
+            "1791381003.600  42  42 I VRI[MainActivity]: visibilityChanged oldVisibility=true newVisibility=false",
+            "1791381003.700  42  42 D InsetsController: hide(ime(), fromIme=false)",
+            "1791381003.800  42  42 W OpenGLRenderer: Failed to choose config with EGL_SWAP_BEHAVIOR_PRESERVED",
+            "1791381003.900  42  42 I Choreographer: Skipped 42 frames!  The application may be doing too much work on its main thread.",
+            "1791381004.000  42  42 D MyApp: loaded 3 items",
+        )
+        val events = LogcatParser.events(lines, 0, Long.MAX_VALUE)
+        assertEquals(listOf("OpenGLRenderer", "Choreographer", "MyApp"), events.map { it.tag })
+        assertEquals("warn", events[0].level)
+    }
+
+    @Test
     fun `continuation lines of one message are joined`() {
         val trace = LogcatParser.events(sample, 0, Long.MAX_VALUE).single { it.tag == "System.err" }
         assertEquals(

@@ -94,6 +94,6 @@ class ReportTimelineTest {
         assertTrue("took $elapsedMs ms", elapsedMs < 5_000)
         assertEquals(listOf("early"), slow)
         assertTrue(LogcatReader.read(listOf("/definitely/not/a/binary")).isEmpty())
-        assertEquals(listOf("logcat", "-d", "-v", "epoch", "-t", "500", "--pid=42"), LogcatReader.command(42))
+        assertEquals(listOf("logcat", "-d", "-v", "epoch", "-t", "1500", "--pid=42"), LogcatReader.command(42))
     }
 }

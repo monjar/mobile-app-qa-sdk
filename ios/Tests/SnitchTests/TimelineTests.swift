@@ -274,3 +274,25 @@ final class TimelineRecorderTests: XCTestCase {
         XCTAssertEqual(shared.freeze().nativeConsole?.excludeReactNative, true)
     }
 }
+
+final class ConsoleReaderFilterTests: XCTestCase {
+    func testAppleFrameworkChatterIsDroppedButItsErrorsAreKept() {
+        XCTAssertFalse(ConsoleReader.keeps(subsystem: "com.apple.UIKit", level: .info, excludeReactNative: false))
+        XCTAssertFalse(ConsoleReader.keeps(subsystem: "com.apple.runningboard", level: .debug, excludeReactNative: false))
+        XCTAssertFalse(ConsoleReader.keeps(subsystem: "com.apple.network", level: .notice, excludeReactNative: false))
+        XCTAssertTrue(ConsoleReader.keeps(subsystem: "com.apple.network", level: .error, excludeReactNative: false))
+        XCTAssertTrue(ConsoleReader.keeps(subsystem: "com.apple.CFNetwork", level: .fault, excludeReactNative: false))
+    }
+
+    func testAppLibraryAndNSLogLinesAreKeptAtEveryLevel() {
+        XCTAssertTrue(ConsoleReader.keeps(subsystem: "com.mochiro.app", level: .debug, excludeReactNative: false))
+        XCTAssertTrue(ConsoleReader.keeps(subsystem: "host.exp.Expo", level: .info, excludeReactNative: false))
+        XCTAssertTrue(ConsoleReader.keeps(subsystem: "", level: .info, excludeReactNative: false))
+    }
+
+    func testSnitchAndDoubleCountedReactNativeLinesAreSkipped() {
+        XCTAssertFalse(ConsoleReader.keeps(subsystem: SDKLog.subsystem, level: .error, excludeReactNative: false))
+        XCTAssertTrue(ConsoleReader.keeps(subsystem: ConsoleReader.reactNativeSubsystem, level: .info, excludeReactNative: false))
+        XCTAssertFalse(ConsoleReader.keeps(subsystem: ConsoleReader.reactNativeSubsystem, level: .info, excludeReactNative: true))
+    }
+}

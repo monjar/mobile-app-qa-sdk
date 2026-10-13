@@ -599,16 +599,20 @@ Nothing is recorded while Snitch is off, and nothing leaves the device unless a 
 - iOS, at Send (on the report queue, ≤ 2 s budget, then stop reading):
   `OSLogStore(scope: .currentProcessIdentifier)` entries of the last 5 minutes,
   `OSLogEntryLog` only, newest 300, excluding the subsystem
-  `io.github.monjar.snitch`; source `native`, `tag` = subsystem (or category).
+  `io.github.monjar.snitch`, and for Apple's own `com.apple.*` subsystems keeping
+  only errors and faults (their info/debug chatter would crowd out the app's lines);
+  source `native`, `tag` = subsystem (or category).
   Levels: debug→debug, info/notice→info, error→error, fault→error.
 - React Native iOS: when Snitch activates with console on, the RN module calls
   `RCTSetLogThreshold(min(current, RCTLogLevelInfo))` and `RCTAddLogFunction`;
   lines with `RCTLogSourceJavaScript` become source `js` (info/warn/error by RN
   level). os_log entries of subsystem `com.facebook.react.log` are then skipped
   so JS lines aren't counted twice. Store builds (inert SDK) are untouched.
-- Android, at Send (≤ 2 s): `logcat -d -v epoch -t 500 --pid=<myPid>`, parsed
+- Android, at Send (≤ 2 s): `logcat -d -v epoch -t 1500 --pid=<myPid>`, parsed
   (`V/D`→debug, `I`→info, `W`→warn, `E/F/A`→error); tag `ReactNativeJS` → source
-  `js`, tag `Snitch` skipped, everything else source `logcat`.
+  `js`, tag `Snitch` skipped, everything else source `logcat`. Verbose, debug and
+  info lines of known framework chatter tags (HWUI's `app_time_stats`, ViewRootImpl,
+  IME and emulator GL bookkeeping; `LogcatParser.FRAMEWORK_CHATTER`) are dropped.
 
 ### 11.5 Network capture (opt-in: `CaptureNetwork`)
 

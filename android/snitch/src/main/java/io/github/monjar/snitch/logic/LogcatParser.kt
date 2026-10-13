@@ -13,6 +13,12 @@
  * (a stack trace) as its own entry with the same header; consecutive entries with
  * the same time, thread, level and tag are joined back into one event.
  *
+ * The framework writes routine chatter into every app's log — HWUI's per-second
+ * `app_time_stats`, ViewRootImpl and IME bookkeeping, emulator GL lines — which
+ * would fill the timeline's 500 lines within minutes. Verbose, debug and info
+ * lines of those tags are dropped; their warnings and errors are kept, as is
+ * everything from other tags (Choreographer's "Skipped N frames" included).
+ *
  * Pure Kotlin; the process is run by timeline/LogcatReader on the device.
  */
 package io.github.monjar.snitch.logic
@@ -22,6 +28,22 @@ object LogcatParser {
 
     const val TAG_JS = "ReactNativeJS"
     const val TAG_SNITCH = "Snitch"
+
+    /** Framework tags whose V/D/I lines are routine chatter (see the header). */
+    val FRAMEWORK_CHATTER: Set<String> = setOf(
+        "OpenGLRenderer", "HWUI", "EGL_emulation", "libEGL", "HostConnection", "goldfish-address-space",
+        "Gralloc4", "AdrenoGLES", "AdrenoGLES-0", "BLASTBufferQueue", "FrameEvents", "SurfaceView",
+        "ViewRootImpl", "InsetsController", "InsetsSourceConsumer", "ImeTracker", "InputMethodManager",
+        "WindowOnBackDispatcher", "CompatChangeReporter", "CompatibilityChangeReporter", "ProfileInstaller",
+        "nativeloader", "ziparchive", "AutofillManager", "AssistStructure", "TextClassifier", "ResourcesManager",
+        "DesktopModeFlags", "ApplicationLoaders", "GraphicsEnvironment", "AppCompatDelegate",
+    )
+
+    /** Whether a line is framework chatter to leave out of the timeline. */
+    @JvmStatic
+    fun isChatter(priority: Char, tag: String): Boolean =
+        (priority == 'V' || priority == 'D' || priority == 'I') &&
+            (tag in FRAMEWORK_CHATTER || tag.startsWith("VRI["))
 
     private val LINE = Regex("^\\s*(\\d+)\\.(\\d{3})\\d*\\s+(\\d+)\\s+(\\d+)\\s+([VDIWEFA])\\s+(.*?)\\s*:(?: (.*))?$")
 
@@ -65,7 +87,7 @@ object LogcatParser {
             val body = text?.toString() ?: p.msg
             pending = null
             text = null
-            if (p.tag == TAG_SNITCH || p.t < from || p.t > to) return
+            if (p.tag == TAG_SNITCH || isChatter(p.priority, p.tag) || p.t < from || p.t > to) return
             val src = if (p.tag == TAG_JS) "js" else "logcat"
             out.add(TimelineEvent.log(p.t, level(p.priority), src, body, p.tag))
         }

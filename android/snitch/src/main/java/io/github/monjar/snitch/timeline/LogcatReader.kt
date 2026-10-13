@@ -1,6 +1,6 @@
 /*
  * Reads this app's recent logcat lines at send time (spec §11.4):
- * `logcat -d -v epoch -t 500 --pid=<pid>`. Apps may read their own UID's logs
+ * `logcat -d -v epoch -t 1500 --pid=<pid>`. Apps may read their own UID's logs
  * without any permission (Android 4.1+); `--pid` needs Android 7, the SDK's
  * minimum.
  *
@@ -15,7 +15,8 @@ import java.io.IOException
 
 internal object LogcatReader {
     const val TIMEOUT_MS = 2_000L
-    private const val TAIL_LINES = 500
+    // More than the timeline keeps: framework chatter is filtered out after reading.
+    private const val TAIL_LINES = 1500
     private const val MAX_LINES = 5_000
 
     fun command(pid: Int): List<String> = listOf("logcat", "-d", "-v", "epoch", "-t", TAIL_LINES.toString(), "--pid=$pid")
