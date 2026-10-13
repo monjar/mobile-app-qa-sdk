@@ -700,7 +700,7 @@ final class SnitchRuntime: WindowTouchRecognizerHost {
             email: submission.email,
             frozen: isCrash ? nil : pending.frozen
         )
-        context.timeline = timelineForReport(pending.timeline)
+        context.timeline = pending.timeline
         context.screen = isCrash ? nil : pending.timeline?.screen
         context.crashText = pending.crash?.text
         let video = submission.includeVideo && !isCrash
@@ -710,11 +710,6 @@ final class SnitchRuntime: WindowTouchRecognizerHost {
         if isCrash { crashStore?.discardPending() }
     }
 
-    /// The frozen timeline, for servers that show it (`timeline` feature); older servers
-    /// would reject the attachment's content type and drop the whole report.
-    private func timelineForReport(_ timeline: TimelineSnapshot?) -> TimelineSnapshot? {
-        effective.serverFeatures.contains(ServerFeature.timeline) ? timeline : nil
-    }
 
     private func makeContext(trigger: String, typeId: String, description: String, email: String?, frozen: FrozenCapture?) -> ReportContext {
         let snapshot = stats.snapshot()
@@ -852,13 +847,12 @@ final class SnitchRuntime: WindowTouchRecognizerHost {
         screenTracker.infer()
         let frozen = freeze(endT: Clock.nowMs())
         let snapshot = recorder.freeze()
-        let timeline = timelineForReport(snapshot)
         let screenshot = takeScreenshot()
         let recorded = recordedSeconds(frozen)
         let seconds = effective.videoEnabled && recorded > 0 ? max(1, min(5, Int(frozen.bufferedSeconds.rounded(.down)))) : 0
-        SDKLog.info("Debug autoreport: screenshot \(screenshot != nil), video \(seconds) s, timeline \(timeline != nil)")
+        SDKLog.info("Debug autoreport: screenshot \(screenshot != nil), video \(seconds) s, timeline \(snapshot.events.count) events")
         var context = makeContext(trigger: "api", typeId: "bug", description: "autoreport", email: nil, frozen: frozen)
-        context.timeline = timeline
+        context.timeline = snapshot
         context.screen = snapshot.screen
         enqueue(
             context,

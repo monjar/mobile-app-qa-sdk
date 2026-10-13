@@ -11,7 +11,8 @@
 // frozen with the capture, finished here — the unified-log lines are read now, on
 // the report queue, and meta.videoStart/videoEnd come from the clip just composed —
 // and `crash` (text/plain, spec §11.8), the saved diagnostic of a crash follow-up.
-// The runtime only passes a timeline to servers that list the `timeline` feature.
+// Every report carries the timeline: servers since 0.1 accept application/x-ndjson,
+// so it doesn't wait for the first config fetch to confirm the `timeline` feature.
 
 import Foundation
 
