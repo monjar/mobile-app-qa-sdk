@@ -1,0 +1,178 @@
+name: todo demo
+
+# examples/todo on the iOS simulator against a local Snitch server: the screenshots used in the
+# docs and blog posts, and a real report (screenshot, video, timeline) from the app.
+#   1. first launch: the one-time tester notice
+#   2. the list
+#   3. the report sheet (SNITCH_DEBUG_SHOW_ON_LAUNCH)
+#   4. `-demo story`: the app ticks "Buy oat milk", the save 404s and rolls back, then the debug
+#      autoreport files a bug with the last 5 s
+# Everything ends up in the "todo-demo" artifact. The log also prints each file as base64 between
+# ===== markers, for readers that can't download artifacts.
+on:
+  push:
+    branches: [master]
+    paths:
+      - examples/todo/**
+      - .github/workflows/todo-demo.yml
+  pull_request:
+    paths:
+      - examples/todo/**
+      - .github/workflows/todo-demo.yml
+  workflow_dispatch:
+
+concurrency:
+  group: todo-demo-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CI: "1"
+  EXPO_NO_TELEMETRY: "1"
+  SNITCH_SKIP_SYNC: "1"
+
+jobs:
+  ios:
+    name: todo demo (iOS simulator screenshots + report)
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            react-native/package-lock.json
+            examples/todo/package-lock.json
+      - name: Pack react-native-snitch
+        working-directory: react-native
+        env:
+          SNITCH_SKIP_SYNC: "0"
+        run: |
+          npm ci --no-audit --no-fund
+          mkdir -p ../rn-tarball
+          npm pack --pack-destination ../rn-tarball
+      - name: Install (react-native-snitch from the tarball)
+        working-directory: examples/todo
+        run: |
+          TGZ=$(ls "$GITHUB_WORKSPACE"/rn-tarball/react-native-snitch-*.tgz)
+          REL=$(node -e 'console.log(require("path").relative(process.cwd(), process.argv[1]))' "$TGZ")
+          npm pkg set "dependencies.react-native-snitch=file:$REL"
+          npm install --no-audit --no-fund
+          npx tsc --noEmit
+      - name: Prebuild (runs pod install)
+        working-directory: examples/todo
+        run: |
+          xcodebuild -version
+          npx expo prebuild --platform ios
+          APP_NAME=$(basename ios/*.xcworkspace .xcworkspace)
+          echo "APP_NAME=$APP_NAME" >> "$GITHUB_ENV"
+      - name: Pick a simulator
+        run: |
+          UDID=$(xcrun simctl list devices available -j | node -e '
+            const d = JSON.parse(require("fs").readFileSync(0, "utf8")).devices;
+            const ios = Object.keys(d).filter((k) => k.includes("iOS")).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+            for (const k of ios) {
+              const phones = d[k].filter((x) => x.isAvailable && /^iPhone/.test(x.name));
+              const p = phones.find((x) => / Pro$/.test(x.name)) ?? phones[0];
+              if (p) { console.log(p.udid); break; }
+            }')
+          test -n "$UDID"
+          echo "SIM_UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl list devices | grep "$UDID"
+      - name: Build (Release, simulator)
+        working-directory: examples/todo/ios
+        run: |
+          status=0
+          xcodebuild -workspace "$APP_NAME.xcworkspace" -scheme "$APP_NAME" -configuration Release \
+            -sdk iphonesimulator -destination "id=$SIM_UDID" -derivedDataPath build \
+            ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO \
+            build > "$RUNNER_TEMP/xcodebuild.log" 2>&1 || status=$?
+          grep -E "error:|\*\* BUILD" "$RUNNER_TEMP/xcodebuild.log" | tail -100 || true
+          if [ "$status" -ne 0 ]; then tail -150 "$RUNNER_TEMP/xcodebuild.log"; exit "$status"; fi
+          test -d "build/Build/Products/Release-iphonesimulator/$APP_NAME.app"
+      - name: Start the Snitch server
+        run: bash scripts/ci-start-server.sh
+      - name: Boot the simulator (light mode, clean status bar)
+        run: |
+          xcrun simctl boot "$SIM_UDID" || true
+          xcrun simctl bootstatus "$SIM_UDID" -b
+          xcrun simctl ui "$SIM_UDID" appearance light
+          xcrun simctl status_bar "$SIM_UDID" override --time 9:41 --dataNetwork wifi --wifiMode active --wifiBars 3 \
+            --cellularMode active --cellularBars 4 --batteryState charged --batteryLevel 100
+          open -a Simulator --args -CurrentDeviceUDID "$SIM_UDID" || true
+          xcrun simctl install "$SIM_UDID" "examples/todo/ios/build/Build/Products/Release-iphonesimulator/$APP_NAME.app"
+          mkdir -p "$RUNNER_TEMP/demo"
+      - name: "1. First launch: the tester notice"
+        run: |
+          xcrun simctl launch "$SIM_UDID" io.github.monjar.snitch.todo
+          sleep 12
+          xcrun simctl io "$SIM_UDID" screenshot "$RUNNER_TEMP/demo/01-notice.png"
+          sleep 2
+          xcrun simctl terminate "$SIM_UDID" io.github.monjar.snitch.todo || true
+      - name: "2. The list"
+        run: |
+          xcrun simctl launch "$SIM_UDID" io.github.monjar.snitch.todo
+          sleep 8
+          xcrun simctl io "$SIM_UDID" screenshot "$RUNNER_TEMP/demo/02-list.png"
+          xcrun simctl terminate "$SIM_UDID" io.github.monjar.snitch.todo || true
+      - name: "3. The report sheet"
+        run: |
+          SIMCTL_CHILD_SNITCH_DEBUG_SHOW_ON_LAUNCH=1 xcrun simctl launch "$SIM_UDID" io.github.monjar.snitch.todo
+          sleep 7
+          xcrun simctl io "$SIM_UDID" screenshot "$RUNNER_TEMP/demo/03-sheet.png"
+          # Best effort: type a description through the Simulator window (needs accessibility access).
+          if osascript -e 'tell application "Simulator" to activate' -e 'delay 1' \
+               -e 'tell application "System Events" to keystroke "I ticked Buy oat milk and it unticked itself a second later."'; then
+            sleep 2
+            xcrun simctl io "$SIM_UDID" screenshot "$RUNNER_TEMP/demo/03-sheet-typed.png"
+          else
+            echo "::notice::could not type into the simulator; skipping 03-sheet-typed"
+          fi
+          xcrun simctl terminate "$SIM_UDID" io.github.monjar.snitch.todo || true
+      - name: "4. The bug, then a debug autoreport"
+        run: |
+          SIMCTL_CHILD_SNITCH_DEBUG_AUTOREPORT=11 xcrun simctl launch "$SIM_UDID" io.github.monjar.snitch.todo -demo story
+          sleep 9
+          xcrun simctl io "$SIM_UDID" screenshot "$RUNNER_TEMP/demo/04-rollback.png"
+      - name: Wait for the report
+        run: >-
+          node scripts/ci-await-report.mjs --server http://127.0.0.1:8080 --description autoreport --out "$RUNNER_TEMP/demo/report" --timeout 600
+          --expect-timeline log,net,screen,app --expect-net "/todo/3" --expect-log "rolling back" --expect-screen Today --expect-checkin ios
+      - name: Collect diagnostics
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/demo"
+          xcrun simctl io "$SIM_UDID" screenshot "$RUNNER_TEMP/demo/99-last.png" || true
+          xcrun simctl spawn "$SIM_UDID" log show --last 20m --style compact \
+            --predicate 'process == "'"$APP_NAME"'"' > "$RUNNER_TEMP/demo/app.log" 2>&1 || true
+          cp "$RUNNER_TEMP/snitch-server.log" "$RUNNER_TEMP/demo/" 2>/dev/null || true
+          cp "$RUNNER_TEMP/xcodebuild.log" "$RUNNER_TEMP/demo/" 2>/dev/null || true
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: todo-demo
+          path: ${{ runner.temp }}/demo
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Print the images and the report as base64
+        if: always()
+        run: |
+          cd "$RUNNER_TEMP/demo"
+          for f in 0*.png 99-last.png; do
+            [ -f "$f" ] || continue
+            sips -s format jpeg -s formatOptions 85 "$f" --out "${f%.png}.jpg" >/dev/null
+          done
+          for f in 0*.jpg 99-last.jpg report/*; do
+            [ -f "$f" ] || continue
+            echo "===== BEGIN $f ($(wc -c < "$f") bytes) ====="
+            base64 -b 76 -i "$f"
+            echo "===== END $f ====="
+          done
