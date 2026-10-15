@@ -7,7 +7,7 @@ Mochiro (Expo 52, RN 0.76, iOS) uses Snitch through configuration only. Its own 
 
 | File | Change |
 |---|---|
-| `package.json` / `package-lock.json` | `"react-native-snitch": "^0.3.0"` |
+| `package.json` / `package-lock.json` | `"react-native-snitch": "^0.4.0"` |
 | `app.json` → `expo.plugins` | the entry below |
 
 ```json
@@ -26,7 +26,7 @@ Mochiro (Expo 52, RN 0.76, iOS) uses Snitch through configuration only. Its own 
 ```
 
 History: 0.1.0 shipped with the three-finger hold (Pamirmali/mochiro-mobile#41), 0.1.1 fixed it on TestFlight, and
-0.3.0 with the options above is Pamirmali/mochiro-mobile#45.
+0.3.0 with the options above is Pamirmali/mochiro-mobile#45, and 0.4.0 (requests still running when a report opens stay in its timeline) is Pamirmali/mochiro-mobile#49.
 
 **Why the edge handle.** Testers never found the three-finger hold. The handle is a faded tab on the right edge in
 the Graphite accent: pulled left about 44 pt it opens the sheet, a tap or a vertical swipe near the edge does nothing,
@@ -97,8 +97,8 @@ login: Snitch's, or GitHub's for a private repository.
 
 ## Shipping
 
-- Deploy the server first when its version is behind the app's: `fly deploy --image ghcr.io/monjar/snitch-server:0.3.0`.
-  A 0.3 app still works against an older server, but it skips what the server doesn't offer (chunked uploads, crash
+- Deploy the server first when its version is behind the app's: `fly deploy --image ghcr.io/monjar/snitch-server:0.4.0`.
+  A 0.4 app still works against an older server, but it skips what the server doesn't offer (chunked uploads, crash
   reports).
 - Build TestFlight the usual way: `scripts/release-ios.sh --bump`. Nothing else changes.
 - For a quick local check, an EAS `preview` build or `npm run ios` also has Snitch enabled.
