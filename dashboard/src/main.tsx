@@ -15,6 +15,8 @@ import { Devices } from './pages/Devices';
 import { Team } from './pages/Team';
 import { Jobs } from './pages/Jobs';
 import { NewProject } from './pages/NewProject';
+import { Tokens } from './pages/Tokens';
+import { Device } from './pages/Device';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -45,6 +47,9 @@ function App() {
         <Route path="/login">
           <Redirect to="/" />
         </Route>
+        <Route path="/tokens" component={Tokens} />
+        {/* `snitch login` sends people here (/device?code=XXXX-XXXX); signing in first keeps the URL. */}
+        <Route path="/device" component={Device} />
         <Route path="/team">{user.role === 'admin' ? <Team /> : <Redirect to="/" />}</Route>
         <Route path="/jobs">{user.role === 'admin' ? <Jobs /> : <Redirect to="/" />}</Route>
         <Route>

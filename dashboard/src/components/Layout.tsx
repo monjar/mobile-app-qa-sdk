@@ -3,7 +3,7 @@ import { Link, useLocation } from 'wouter';
 import { useAuth } from '../lib/auth';
 import { useProjects, useServerInfo } from '../lib/queries';
 import { useSelectedProject } from '../lib/project';
-import { Activity, Inbox, Logo, Menu, Phone, Plus, Settings, Users } from './icons';
+import { Activity, Inbox, Logo, Menu, Phone, Plus, Settings, Terminal, Users } from './icons';
 import { Avatar } from './ui';
 
 function NavLink({ href, children, count, match }: { href: string; children: ReactNode; count?: number; match?: (path: string) => boolean }) {
@@ -100,6 +100,11 @@ export function Layout({ children, onNewProject }: { children: ReactNode; onNewP
             <Plus /> New project
           </button>
         )}
+
+        <div className="nav-section">You</div>
+        <NavLink href="/tokens" match={(p) => p === '/tokens' || p === '/device'}>
+          <Terminal /> API tokens
+        </NavLink>
 
         {user?.role === 'admin' && (
           <>
