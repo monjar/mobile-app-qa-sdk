@@ -11,6 +11,7 @@ import { SnitchClient, SnitchError } from './client';
 import { Credentials, normalizeServer } from './credentials';
 import { collectEvidence, defaultDir, ticketSummary } from './evidence';
 import { runMcp } from './mcp';
+import { fillTemplate, installSkill, templateText } from './skill';
 import { VERSION } from './version';
 
 export const HELP = `snitch ${VERSION}: Snitch QA tickets from the terminal, and an MCP server for coding agents
@@ -31,6 +32,11 @@ Usage
                                        save screenshot, video, frames, timeline, logs and report.md
   snitch comment <KEY|id|link> <text…>  (or the text on stdin)
   snitch status <KEY|id|link> <status> [--fixed-in BUILD]
+
+  snitch skill install [--dir DIR] [--project slug] [--force]
+                                       add the snitch-fix agent skill to a project (.claude/skills/), filled in
+                                       with your server and ticket prefix: reports in, pull requests out
+  snitch skill print                   print it instead, for other agents
 
   snitch mcp [--read-only]             run the MCP server on stdio (for Claude Code, Cursor, …);
                                        --read-only leaves out the tools that comment and change status
@@ -227,6 +233,8 @@ export async function run(argv: string[], io: Io = processIo): Promise<void> {
       out: { type: 'string' },
       'no-frames': { type: 'boolean' },
       'fixed-in': { type: 'string' },
+      dir: { type: 'string' },
+      force: { type: 'boolean' },
     },
   });
   const [cmd, ...args] = positionals;
@@ -320,6 +328,39 @@ export async function run(argv: string[], io: Io = processIo): Promise<void> {
       const detail = await client.ticket(ref);
       await client.update(detail.ticket.id, { status: status as TicketStatus, ...(v['fixed-in'] ? { fixedIn: v['fixed-in'] } : {}) });
       return out(`${detail.ticket.key}: ${detail.ticket.status} → ${status}`);
+    }
+
+    case 'skill': {
+      const sub = args[0];
+      if (sub !== 'install' && sub !== 'print') throw new UsageError('Usage: snitch skill install [--dir DIR] [--project slug] [--force] | snitch skill print');
+      // Fill in what we know: the server, and the ticket prefix when it's clear which project.
+      const server = creds.server(v.server);
+      let prefix: string | null = null;
+      const notes: string[] = [];
+      if (server && (await creds.token(server))) {
+        try {
+          const projects = await (await signedIn(creds, v.server)).projects();
+          const chosen = v.project ? projects.find((p) => p.slug === v.project || p.id === v.project) : projects.length === 1 ? projects[0] : undefined;
+          if (chosen) prefix = chosen.ticketPrefix;
+          else if (v.project) throw new UsageError(`No project ${v.project} on ${server}`);
+          else notes.push(`${projects.length} projects on ${server}: pass --project <slug> to fill in the ticket prefix.`);
+        } catch (e) {
+          if (e instanceof UsageError) throw e;
+          notes.push(`Couldn't read projects from ${server} (${e instanceof Error ? e.message : String(e)}); the ticket prefix is a placeholder.`);
+        }
+      } else notes.push('Not signed in, so the server and ticket prefix are placeholders. Run `snitch login` first to fill them in.');
+      const text = fillTemplate(templateText(), { server, prefix });
+      if (sub === 'print') {
+        out(text);
+        for (const n of notes) io.err(n);
+        return;
+      }
+      const path = installSkill(v.dir ?? process.cwd(), text, Boolean(v.force));
+      out(`Wrote ${path}`);
+      for (const n of notes) out(`  note: ${n}`);
+      out(`Next: fill in the "This project" table in it (checks to run, how to run the app), then ask your agent to "fix the Snitch reports".`);
+      out(`For Claude Code, the snitch MCP server makes reports visible as images: claude mcp add snitch -- npx -y snitch-cli mcp`);
+      return;
     }
 
     case 'mcp': {

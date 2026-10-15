@@ -5,7 +5,7 @@
  * and optional (the CLI falls back to a file when it's missing).
  */
 import { build } from 'esbuild';
-import { chmodSync, readFileSync } from 'node:fs';
+import { chmodSync, cpSync, readFileSync } from 'node:fs';
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
@@ -26,3 +26,5 @@ await build({
   logLevel: 'info',
 });
 chmodSync('dist/snitch.js', 0o755);
+// The agent skill template ships with the package (snitch skill install).
+cpSync('../skills', 'dist/skills', { recursive: true });

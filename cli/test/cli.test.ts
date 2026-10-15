@@ -176,6 +176,34 @@ describe('snitch CLI', () => {
   });
 });
 
+describe('snitch skill', () => {
+  it('installs the agent skill, filled in with the server and ticket prefix', async () => {
+    const m = machine();
+    await m.cli('login', '--server', base);
+    const project = mkdtempSync(join(tmpdir(), 'snitch-project-'));
+    const printed = await m.cli('skill', 'install', '--dir', project);
+    const path = join(project, '.claude', 'skills', 'snitch-fix', 'SKILL.md');
+    expect(printed).toContain(`Wrote ${path}`);
+    const text = readFileSync(path, 'utf8');
+    expect(text).toMatch(/^---\nname: snitch-fix\n/);
+    expect(text).toContain(`npx snitch-cli login --server ${base}`);
+    expect(text).toContain('MOCH-12');
+    expect(text).not.toContain('{{');
+    // Someone's edited skill is never overwritten by accident.
+    await expect(m.cli('skill', 'install', '--dir', project)).rejects.toThrow('already exists');
+    await m.cli('skill', 'install', '--dir', project, '--force');
+  });
+
+  it('prints it with placeholders when signed out', async () => {
+    const m = machine({ approve: false });
+    const text = await m.cli('skill', 'print');
+    expect(text).toContain('https://your-snitch-server');
+    expect(text).toContain('APP-12');
+    expect(m.errs.join('\n')).toContain('Not signed in');
+    await expect(m.cli('skill', 'nope')).rejects.toThrow('Usage: snitch skill');
+  });
+});
+
 describe('snitch mcp', () => {
   async function connect(client: () => Promise<SnitchClient>, opts: { readOnly?: boolean } = {}) {
     const [a, b] = InMemoryTransport.createLinkedPair();

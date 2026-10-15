@@ -8,6 +8,7 @@ npx snitch-cli login --server https://snitch.example.com   # approve the code in
 npx snitch-cli tickets
 npx snitch-cli ticket APP-12 --download                    # screenshot, video frames, timeline.txt, report.md
 claude mcp add snitch -- npx -y snitch-cli mcp            # or any MCP client
+npx snitch-cli skill install                               # an agent skill: reports in, pull requests out
 ```
 
 Needs Snitch server 0.5+, Node 22.13+, and ffmpeg for video frames. Tokens are kept in the OS credential store.
