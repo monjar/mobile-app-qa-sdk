@@ -103,7 +103,9 @@ Opt-in (`CaptureNetwork` / `captureNetwork: true`). Each request records the
 method, the URL with credentials and the fragment removed and every query
 value replaced by `*` (`https://api.example.com/search?q=*`), the status,
 duration, request/response sizes and the error text. Headers and bodies are
-never read. Requests to the Snitch server are never recorded.
+never read. Requests to the Snitch server are never recorded. A request still
+running when the report opens is kept too, marked "in flight" with the time it
+had taken so far.
 
 How: a forwarding `URLProtocol` (no swizzling). It is registered on activation,
 which covers `URLSession.shared` (and `NSURLConnection`). For a session you

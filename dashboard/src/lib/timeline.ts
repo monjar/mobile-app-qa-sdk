@@ -3,7 +3,7 @@
  * events a filter keeps, how runs of touches fold into one row, and how wall-clock
  * event times line up with the clip (meta.videoStart / videoEnd).
  */
-import type { TimelineEvent, TimelineMeta, TimelineNet } from '@snitch/contract';
+import { NET_IN_FLIGHT, type TimelineEvent, type TimelineMeta, type TimelineNet } from '@snitch/contract';
 
 /** Every composed clip is 10 fps (docs/sdk-spec.md §5.7), so one frame is 100 ms. */
 export const CLIP_FPS = 10;
@@ -32,7 +32,12 @@ export function toWallTime(seconds: number, span: VideoSpan): number {
   return span.start + seconds * 1000;
 }
 
-/** No response, a transport error, or a 4xx/5xx. */
+/** Still running when the report was opened (it may be the request that hangs). */
+export function isInFlight(e: TimelineNet): boolean {
+  return e.error === NET_IN_FLIGHT && e.status === undefined;
+}
+
+/** No response, a transport error, or a 4xx/5xx. A request still in flight counts too. */
 export function isFailedRequest(e: TimelineNet): boolean {
   return e.error !== undefined || e.status === undefined || e.status >= 400;
 }

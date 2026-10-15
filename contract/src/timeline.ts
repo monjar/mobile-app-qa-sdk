@@ -90,8 +90,15 @@ export const TimelineNet = z.object({
   ms: z.number().nonnegative().optional(),
   reqBytes: z.number().int().nonnegative().optional(),
   resBytes: z.number().int().nonnegative().optional(),
+  /** Transport error text, or NET_IN_FLIGHT. */
   error: z.string().max(300).optional(),
 });
+
+/**
+ * `error` of a request that was still running when the SDK froze the timeline (the report
+ * opened): it has no `status`, and its `ms` runs to the freeze.
+ */
+export const NET_IN_FLIGHT = 'in flight';
 
 export const TimelineScreen = z.object({
   k: z.literal('screen'),

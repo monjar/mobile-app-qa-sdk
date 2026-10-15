@@ -152,7 +152,10 @@ What is recorded: the method, the URL **sanitized** (no credentials, no
 fragment, every query value replaced: `https://api.example.com/search?q=*`),
 the status, the duration to the end of the response body (or the failure), the
 request and response sizes, and the exception text of a failed request. Never
-headers, never bodies. Requests to your Snitch server are never recorded.
+headers, never bodies. Requests to your Snitch server are never recorded. With
+the interceptor, a request still running when the report opens (or whose body
+is still being read) is kept too, marked "in flight" with the time it had taken
+so far; `recordNetwork` only knows about requests once they have finished.
 
 The interceptor is safe to install unconditionally, also before Snitch starts
 and in store builds: until Snitch is active with network capture on it only

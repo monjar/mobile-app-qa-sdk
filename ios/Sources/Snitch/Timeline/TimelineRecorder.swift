@@ -16,6 +16,10 @@
 //   where the unified-log lines are added (ConsoleReader).
 // - The app's own screen name (Snitch.setScreen) is remembered even while Snitch
 //   is off, so a name set before activation becomes the first screen event.
+// - Requests are recorded when they finish, so the network protocol also registers
+//   each one as it starts (`requestStarted`); one still running at freeze goes into
+//   the snapshot as `error: "in flight"` with `ms` up to the freeze. That keeps a
+//   request that hangs — often the bug being reported — in the report.
 
 import Foundation
 
@@ -60,6 +64,12 @@ final class TimelineRecorder {
         var fingers: Int
     }
 
+    private struct RunningRequest {
+        var t: Int64
+        var method: String
+        var url: String
+    }
+
     /// Clocks, injectable for tests.
     var wallNow: () -> Int64 = { TimelineText.nowMs() }
     var monoNow: () -> Double = { Clock.nowMs() }
@@ -71,6 +81,9 @@ final class TimelineRecorder {
     private var screens = BoundedRing<TimelineEvent>(capacity: TimelineLimits.screens)
     private var appEvents = BoundedRing<TimelineEvent>(capacity: TimelineLimits.app)
     private var touches = BoundedRing<TouchDown>(capacity: TimelineLimits.touches)
+    /// Started and not yet recorded, by request id (ids only increase, so the smallest is the oldest).
+    private var running: [Int: RunningRequest] = [:]
+    private var lastRequestID = 0
     private var dropped = 0
     private var currentScreen: String?
     private var appScreen: String?
@@ -90,7 +103,10 @@ final class TimelineRecorder {
             return
         }
         if !new.console { logs.removeAll() }
-        if !new.network { requests.removeAll() }
+        if !new.network {
+            requests.removeAll()
+            running.removeAll()
+        }
         if !new.screens {
             screens.removeAll()
             currentScreen = nil
@@ -119,11 +135,29 @@ final class TimelineRecorder {
         dropped += logs.append(.log(t: t, level: level, source: source, message: msg, tag: tag))
     }
 
-    /// A finished (or failed) request; `net.t` is when it started.
-    func network(_ net: TimelineNet) {
+    /// A request started at `t` (wall ms); `url` is already sanitized. Until `network(_:requestID:)`
+    /// records it under the returned id, a freeze reports it as in flight. Nil while network
+    /// capture is off. At most TIMELINE_LIMITS.network are tracked; beyond that the oldest is
+    /// forgotten (a request whose end never came).
+    func requestStarted(t: Int64, method: String, url: String) -> Int? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard switches.on, switches.network else { return nil }
+        lastRequestID += 1
+        running[lastRequestID] = RunningRequest(t: t, method: method, url: url)
+        if running.count > TimelineLimits.network, let oldest = running.keys.min() {
+            running.removeValue(forKey: oldest)
+        }
+        return lastRequestID
+    }
+
+    /// A finished (or failed) request; `net.t` is when it started. `requestID` is what
+    /// `requestStarted` returned for it: it is no longer in flight.
+    func network(_ net: TimelineNet, requestID: Int? = nil) {
         let now = wallNow()
         lock.lock()
         defer { lock.unlock() }
+        if let id = requestID { running.removeValue(forKey: id) }
         guard switches.on, switches.network else { return }
         requests.removeLeading { $0.t < now - TimelineLimits.maxAgeMs }
         dropped += requests.append(.net(net))
@@ -205,6 +239,18 @@ final class TimelineRecorder {
             let t = Int64((touch.mono + offset).rounded())
             events.append(.touch(t: t, x: touch.x, y: touch.y, fingers: touch.fingers))
         }
+        for (_, request) in running.sorted(by: { $0.key < $1.key }) {
+            events.append(.net(TimelineNet(
+                t: request.t,
+                method: request.method,
+                url: request.url,
+                status: nil,
+                ms: Double(max(0, wall - request.t)),
+                reqBytes: nil,
+                resBytes: nil,
+                error: TimelineNet.inFlightError
+            )))
+        }
         events = events.filter { $0.t >= cutoff && $0.t <= wall }
         let console = switches.on && switches.console
             ? NativeConsoleRequest(from: cutoff, to: wall, excludeReactNative: jsConsoleUsed)
@@ -259,6 +305,7 @@ final class TimelineRecorder {
         screens.removeAll()
         appEvents.removeAll()
         touches.removeAll()
+        running.removeAll()
         dropped = 0
         currentScreen = nil
     }

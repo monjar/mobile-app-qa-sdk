@@ -68,6 +68,12 @@ sealed class TimelineEvent {
     data class App(override val t: Long, val event: String) : TimelineEvent()
 
     companion object {
+        /**
+         * The `error` of a request that had not finished when the timeline was frozen; its `ms`
+         * runs to the freeze and it has no status (contract NET_IN_FLIGHT).
+         */
+        const val NET_IN_FLIGHT = "in flight"
+
         /** A log line; an unknown level becomes `info`, an unknown source `app`. */
         @JvmStatic
         fun log(t: Long, level: String, src: String, msg: String, tag: String? = null): Log = Log(

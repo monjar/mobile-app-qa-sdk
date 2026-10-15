@@ -89,6 +89,21 @@ class SnitchOkHttpInterceptorTest {
     }
 
     @Test
+    fun `a request whose body is still being read is in flight until it ends`() {
+        val response = client.newCall(Request.Builder().url("$base/streaming?id=7").build()).execute()
+        val running = recorded("/streaming").single()
+        assertEquals("$base/streaming?id=*", running.url)
+        assertNull(running.status)
+        assertEquals(TimelineEvent.NET_IN_FLIGHT, running.error)
+        assertTrue(running.ms!! >= 0.0)
+
+        assertEquals("hello /streaming", response.use { it.body!!.string() })
+        val done = recorded("/streaming").single()
+        assertEquals(200, done.status)
+        assertNull(done.error)
+    }
+
+    @Test
     fun `request bodies are counted, never recorded`() {
         val body = "{\"password\":\"hunter2\"}".toRequestBody("application/json".toMediaType())
         client.newCall(Request.Builder().url("$base/login").post(body).build()).execute().use { it.body!!.string() }

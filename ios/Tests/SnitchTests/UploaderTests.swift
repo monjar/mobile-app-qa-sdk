@@ -11,6 +11,7 @@ import XCTest
 
 final class StubURLProtocol: URLProtocol {
     struct Response {
+        /// 0: fail as offline; negative: never answer (until the task is cancelled).
         var status: Int
         var headers: [String: String] = [:]
         var body: Data = Data()
@@ -58,6 +59,7 @@ final class StubURLProtocol: URLProtocol {
             return
         }
         let r = respond(request)
+        if r.status < 0 { return }
         if r.status == 0 {
             client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
             return

@@ -57,6 +57,10 @@ struct TimelineNet: Equatable {
     var reqBytes: Int?
     var resBytes: Int?
     var error: String?
+
+    /// The `error` of a request that had not finished when the timeline was frozen; its `ms`
+    /// runs to the freeze and it has no status (contract NET_IN_FLIGHT).
+    static let inFlightError = "in flight"
 }
 
 enum TimelineEvent: Equatable {

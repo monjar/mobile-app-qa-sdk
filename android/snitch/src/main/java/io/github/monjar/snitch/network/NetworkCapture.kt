@@ -28,10 +28,37 @@ internal object NetworkCapture {
         return origin == server
     }
 
-    /** A request that started at [startWall] (epoch ms) and took [ms]. */
-    fun record(startWall: Long, method: String, url: String, status: Int?, ms: Double?, reqBytes: Long?, resBytes: Long?, error: String?) {
-        if (!isOn || isSnitchServer(url)) return
-        SnitchState.timeline.net(startWall, method, url, status, ms, reqBytes, resBytes, error)
+    /**
+     * A request is starting at [startWall] (epoch ms): until [record] gets the returned id, a
+     * report opened meanwhile shows it as in flight. 0 when it isn't recorded.
+     */
+    fun start(startWall: Long, method: String, url: String): Long {
+        if (!isOn || isSnitchServer(url)) return 0
+        return SnitchState.timeline.requestStarted(startWall, method, url)
+    }
+
+    /** The request [start] returned [requestId] for ended in a way that isn't recorded. */
+    fun forget(requestId: Long) {
+        SnitchState.timeline.requestEnded(requestId)
+    }
+
+    /** A request that started at [startWall] (epoch ms) and took [ms]; [requestId] from [start]. */
+    fun record(
+        startWall: Long,
+        method: String,
+        url: String,
+        status: Int?,
+        ms: Double?,
+        reqBytes: Long?,
+        resBytes: Long?,
+        error: String?,
+        requestId: Long = 0,
+    ) {
+        if (!isOn || isSnitchServer(url)) {
+            forget(requestId)
+            return
+        }
+        SnitchState.timeline.net(startWall, method, url, status, ms, reqBytes, resBytes, error, requestId)
     }
 
     /** Snitch.recordNetwork: the request finished now, after [durationMs]. */

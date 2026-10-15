@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseTimeline, type TimelineEvent } from '@snitch/contract';
+import { NET_IN_FLIGHT, parseTimeline, type TimelineEvent, type TimelineNet } from '@snitch/contract';
 import fixture from '../../../contract/fixtures/timeline.ndjson?raw';
 import {
   TIMELINE_KINDS,
@@ -7,6 +7,7 @@ import {
   clock,
   filterEvents,
   isError,
+  isInFlight,
   latestAtOrBefore,
   offset,
   stepFrames,
@@ -62,6 +63,14 @@ describe('filtering', () => {
     expect(isError(net({ status: 404 }))).toBe(true);
     expect(isError(net({}))).toBe(true);
     expect(isError(net({ status: 200, error: 'cancelled' }))).toBe(true);
+  });
+
+  it('tells a request still in flight from one that failed', () => {
+    const net = (o: object) => ({ k: 'net', t: 1, method: 'GET', url: 'https://x/', ...o }) as TimelineNet;
+    expect(isInFlight(net({ error: NET_IN_FLIGHT, ms: 2500 }))).toBe(true);
+    expect(isInFlight(net({ error: 'cancelled' }))).toBe(false);
+    expect(isInFlight(net({ status: 200, error: NET_IN_FLIGHT }))).toBe(false);
+    expect(isError(net({ error: NET_IN_FLIGHT }))).toBe(true);
   });
 });
 
