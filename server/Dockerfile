@@ -20,6 +20,8 @@ COPY package.json package-lock.json ./
 COPY contract/package.json contract/
 COPY server/package.json server/
 COPY dashboard/package.json dashboard/
+# The CLI isn't in the image, but npm ci needs every workspace's manifest to match the lockfile.
+COPY cli/package.json cli/
 RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
 
 # ── build: dashboard (Vite) and server (esbuild single file) ─────────────────
