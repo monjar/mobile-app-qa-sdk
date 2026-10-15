@@ -27,6 +27,7 @@ internal object DebugHooks {
             cancelAfterMs = override.cancelAfterMs ?: base.cancelAfterMs,
             showOnLaunch = override.showOnLaunch || base.showOnLaunch,
             chunkBytes = override.chunkBytes ?: base.chunkBytes,
+            hideTesterNotice = override.hideTesterNotice || base.hideTesterNotice,
         )
     }
 

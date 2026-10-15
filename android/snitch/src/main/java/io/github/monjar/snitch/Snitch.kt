@@ -165,6 +165,12 @@ data class SnitchDebugOverrides @JvmOverloads constructor(
     val showOnLaunch: Boolean = false,
     /** SNITCH_DEBUG_CHUNK_BYTES: caps the resumable-upload chunk size (never below the contract's 64 KiB). */
     val chunkBytes: Int? = null,
+    /**
+     * Never show the one-time tester notice in this process (and close it if it is up). It
+     * appears once the app has been idle for a moment and takes touches at the bottom of the
+     * screen, so UI tests that press there set this. Code only; there is no meta-data for it.
+     */
+    val hideTesterNotice: Boolean = false,
 )
 
 object Snitch {

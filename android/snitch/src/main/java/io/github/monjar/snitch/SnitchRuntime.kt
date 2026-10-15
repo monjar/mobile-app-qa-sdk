@@ -1094,6 +1094,10 @@ internal class SnitchRuntime private constructor(
             }
         }
         o.autoReportAfterSeconds?.takeIf { it >= 0 }?.let { scheduleAutoReport(it) }
+        if (o.hideTesterNotice) {
+            noticeHandled = true
+            notice?.dismiss()
+        }
         if (o.showOnLaunch) {
             main.postDelayed({ showReport(trigger = "api", preselectType = null) }, DebugHooks.SHOW_ON_LAUNCH_DELAY_MS)
         }

@@ -11,6 +11,7 @@ import android.content.Intent
 import android.os.SystemClock
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.monjar.snitch.Snitch
+import io.github.monjar.snitch.SnitchDebugOverrides
 import io.github.monjar.snitch.SnitchReleaseType
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -24,6 +25,9 @@ class ThreeFingerHoldTest {
 
     @Before
     fun launch() {
+        // The one-time tester notice shows up once the app has been idle for 2 s, as a touchable
+        // card at the bottom of the screen: over the rows these tests press on a small emulator.
+        Snitch.debugOverrides(SnitchDebugOverrides(hideTesterNotice = true))
         val intent = Intent(instrumentation.targetContext, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
         activity = instrumentation.startActivitySync(intent) as MainActivity
