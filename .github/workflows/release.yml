@@ -38,7 +38,8 @@ jobs:
           registry-url: https://registry.npmjs.org
       - name: Versions agree
         run: node scripts/bump-version.mjs --check ${{ github.ref_type == 'tag' && github.ref_name || '' }}
-      - name: Build and test the package
+      # Build and test everything before publishing anything, so a failure can't leave half a release on npm.
+      - name: Build and test react-native-snitch
         working-directory: react-native
         run: |
           npm ci
@@ -46,20 +47,6 @@ jobs:
           npm test
           node ../scripts/check-pack.mjs
           npm pack
-      - name: Publish to npm
-        if: github.ref_type == 'tag' || inputs.dry_run == false
-        working-directory: react-native
-        env:
-          # Empty unless the fallback secret exists; trusted publishing needs no token.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          npm install -g npm@latest   # trusted publishing needs npm >= 11.5.1
-          npm --version
-          npm publish --access public --provenance
-      - name: Dry run
-        if: github.ref_type != 'tag' && inputs.dry_run != false
-        working-directory: react-native
-        run: npm publish --access public --dry-run
       - name: Build and test snitch-cli
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
@@ -68,16 +55,38 @@ jobs:
           npm run build -w cli
           node cli/dist/snitch.js --version
           npm pack -w cli
-      - name: Publish snitch-cli to npm
+      # Trusted publishing needs npm >= 11.5.1. npm 12 blocks dependency install scripts unless
+      # package.json's allowScripts lists them, which is why the installs above come first.
+      - name: Update npm
+        run: |
+          npm install -g npm@latest
+          npm --version
+      # Each publish skips a version npm already has, so re-running a release (or re-pushing its tag)
+      # after a partial failure publishes only what's missing.
+      - name: Publish react-native-snitch
+        if: github.ref_type == 'tag' || inputs.dry_run == false
+        working-directory: react-native
+        env:
+          # Empty unless the fallback secret exists; trusted publishing needs no token.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          v=$(node -p "require('./package.json').version")
+          if npm view "react-native-snitch@$v" version >/dev/null 2>&1; then echo "react-native-snitch@$v is already on npm"; exit 0; fi
+          npm publish --access public --provenance
+      - name: Publish snitch-cli
         if: github.ref_type == 'tag' || inputs.dry_run == false
         working-directory: cli
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public --provenance
-      - name: Dry run (snitch-cli)
+        run: |
+          v=$(node -p "require('./package.json').version")
+          if npm view "snitch-cli@$v" version >/dev/null 2>&1; then echo "snitch-cli@$v is already on npm"; exit 0; fi
+          npm publish --access public --provenance
+      - name: Dry run
         if: github.ref_type != 'tag' && inputs.dry_run != false
-        working-directory: cli
-        run: npm publish --access public --dry-run
+        run: |
+          (cd react-native && npm publish --access public --dry-run)
+          (cd cli && npm publish --access public --dry-run)
       - uses: actions/upload-artifact@v6
         with:
           name: react-native-snitch
