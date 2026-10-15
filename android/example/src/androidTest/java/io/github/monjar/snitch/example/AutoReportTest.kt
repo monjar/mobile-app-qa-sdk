@@ -41,6 +41,8 @@ class AutoReportTest {
                 serverUrl = SERVER,
                 ingestKey = INGEST_KEY,
                 autoReportAfterSeconds = AUTOREPORT_AFTER_S,
+                // Its card would otherwise take the taps below that land at the bottom of the screen.
+                hideTesterNotice = true,
             ),
         )
 
