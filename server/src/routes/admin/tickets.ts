@@ -2,21 +2,24 @@
  * Ticket triage for the dashboard: list, detail (with similar tickets),
  * status/assignee/type changes, comments, escalation, deletion, attachment
  * content and share links. A change queues what it implies: notification
- * emails and GitHub issue sync.
+ * emails and GitHub issue sync. /tickets/bulk applies one change to many
+ * tickets with the same rules, skipping (and reporting) those it can't touch.
  */
 import { Hono } from 'hono';
 import {
   CommentCreate,
   EscalationCreate,
   ShareLinkCreate,
+  TicketBulkRequest,
   TicketListQuery,
   TicketPatch,
   type SimilarTicketView,
+  type TicketBulkResult,
   type TicketDetail,
 } from '@snitch/contract';
 import type { Deps } from '../../deps';
 import type { AppEnv } from '../../http/env';
-import { HttpError, invalid, notFound } from '../../http/errors';
+import { forbidden, HttpError, invalid, notFound } from '../../http/errors';
 import { requireAdmin } from '../../http/session';
 import { jsonBody, query } from '../../http/validate';
 import { serveBlob } from '../../http/range';
@@ -27,6 +30,7 @@ import {
   deleteTicket,
   escalate,
   queueAssignedNotification,
+  queueBulkAssignedNotification,
   queueGithubCommentSync,
   queueGithubStatusSync,
   queueResolvedNotification,
@@ -134,6 +138,73 @@ export function ticketRoutes(deps: Deps): Hono<AppEnv> {
     }
     if (queued) deps.wake();
     return c.json(detail(deps, fresh));
+  });
+
+  app.post('/tickets/bulk', async (c) => {
+    const body = await jsonBody(c, TicketBulkRequest);
+    const user = c.get('user');
+    const actor = { type: 'user' as const, userId: user.id };
+    if (body.action === 'delete' && user.role !== 'admin') throw forbidden('Only admins delete tickets');
+    if (body.action === 'assign' && body.assigneeUserId !== null && !deps.users.get(body.assigneeUserId)) throw invalid('Unknown user');
+    const integ = body.action === 'escalate' ? deps.integrations.get(body.integrationId) : null;
+    if (body.action === 'escalate') {
+      if (!integ) throw invalid('Unknown integration');
+      if (integ.enabled !== 1) throw invalid(`Integration "${integ.name}" is disabled`);
+    }
+
+    const result: TicketBulkResult = { done: [], skipped: [] };
+    const assigned: { ticket: TicketRow; eventId: number }[] = [];
+    let queued = false;
+    for (const id of [...new Set(body.ids)]) {
+      const t = deps.tickets.get(id);
+      if (!t) {
+        result.skipped.push({ id, reason: 'not found' });
+        continue;
+      }
+      switch (body.action) {
+        case 'assign': {
+          const eventId = deps.tickets.setAssignee(t.id, body.assigneeUserId, actor);
+          if (eventId === null) {
+            result.skipped.push({ id, reason: 'already assigned' });
+            continue;
+          }
+          assigned.push({ ticket: getTicket(deps, t.id), eventId });
+          break;
+        }
+        case 'status': {
+          const eventId = deps.tickets.setStatus(t.id, body.status, actor);
+          if (eventId === null) {
+            result.skipped.push({ id, reason: 'already in that status' });
+            continue;
+          }
+          const fresh = getTicket(deps, t.id);
+          if (fresh.status === 'resolved' && t.status !== 'resolved') queued = queueResolvedNotification(deps, fresh, eventId) || queued;
+          if (!isOpenStatus(fresh.status) || !isOpenStatus(t.status)) queued = queueGithubStatusSync(deps, t.id, eventId) > 0 || queued;
+          break;
+        }
+        case 'escalate': {
+          if (t.project_id !== integ!.project_id) {
+            result.skipped.push({ id, reason: `${integ!.name} belongs to another project` });
+            continue;
+          }
+          if (!escalate(deps, t.id, integ!.id, user.id)) {
+            result.skipped.push({ id, reason: `already escalated to ${integ!.name}` });
+            continue;
+          }
+          queued = true;
+          break;
+        }
+        case 'delete':
+          await deleteTicket(deps, t.id);
+          break;
+      }
+      result.done.push(id);
+    }
+    if (assigned.length > 0) queued = queueBulkAssignedNotification(deps, assigned, user.id) || queued;
+    if (queued) deps.wake();
+    const detail = body.action === 'assign' ? { assigneeUserId: body.assigneeUserId } : body.action === 'status' ? { status: body.status } : body.action === 'escalate' ? { integrationId: body.integrationId } : {};
+    deps.audit.add(user.id, `tickets.bulk_${body.action}`, null, { ...detail, done: result.done.length, skipped: result.skipped.length, ids: result.done.slice(0, 200) }, c.get('ip'));
+    return c.json(result);
   });
 
   app.post('/tickets/:id/comments', async (c) => {

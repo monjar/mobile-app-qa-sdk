@@ -71,6 +71,33 @@ export function queueAssignedNotification(deps: Deps, ticket: TicketRow, actorUs
   return deps.jobs.enqueue(JOB.notify, { ...payload }, { dedupeKey: `${JOB.notify}:${assignedEventId}`, maxAttempts: 5 }) !== null;
 }
 
+/** How many tickets a bulk assignment emails one by one; more than that get one digest. */
+export const DIGEST_THRESHOLD = 3;
+
+/**
+ * After a bulk assignment: emails the assignee per ticket, or one digest for more than DIGEST_THRESHOLD.
+ * `assigned` pairs each ticket with its assignment event (dedupe key).
+ */
+export function queueBulkAssignedNotification(deps: Deps, assigned: { ticket: TicketRow; eventId: number }[], actorUserId: string): boolean {
+  const userId = assigned[0]?.ticket.assignee_user_id;
+  if (!userId || userId === actorUserId) return false;
+  const notifying = assigned.filter(({ ticket }) => deps.projects.get(ticket.project_id)?.notifyAssignees);
+  if (notifying.length <= DIGEST_THRESHOLD) {
+    return notifying.map(({ ticket, eventId }) => queueAssignedNotification(deps, ticket, actorUserId, eventId)).some(Boolean);
+  }
+  const user = deps.users.get(userId);
+  if (!user || user.disabled_at !== null) return false;
+  const payload: NotifyPayload = {
+    ticketId: notifying[0]!.ticket.id,
+    ticketIds: notifying.map(({ ticket }) => ticket.id),
+    to: 'assignee_digest',
+    email: user.email,
+    userId,
+    actorUserId,
+  };
+  return deps.jobs.enqueue(JOB.notify, { ...payload }, { dedupeKey: `${JOB.notify}:digest:${notifying[0]!.eventId}`, maxAttempts: 5 }) !== null;
+}
+
 /** Emails the reporter that their ticket was resolved, when the project opted in and they left an address. */
 export function queueResolvedNotification(deps: Deps, ticket: TicketRow, statusEventId: number): boolean {
   if (ticket.status !== 'resolved' || !ticket.reporter_email || !deps.projects.get(ticket.project_id)?.notifyReporters) return false;
@@ -190,6 +217,7 @@ const handlers: Record<string, Handler> = {
 
   async [JOB.housekeeping](deps) {
     deps.sessions.purgeExpired();
+    deps.accountTokens.purgeExpired();
     deps.jobs.prune(30 * DAY_MS);
   },
 };

@@ -7,7 +7,7 @@ import { AuthProvider, useAuth } from './lib/auth';
 import { ApiError } from './lib/api';
 import { ToastProvider } from './components/ui';
 import { Layout } from './components/Layout';
-import { Login, Setup } from './pages/Login';
+import { Login, SetPassword, Setup } from './pages/Login';
 import { Inbox } from './pages/Inbox';
 import { Ticket } from './pages/Ticket';
 import { ProjectSettings } from './pages/ProjectSettings';
@@ -32,6 +32,7 @@ function App() {
   const [newProject, setNewProject] = useState(false);
   if (loading) return null;
   if (location.startsWith('/setup')) return <Setup />;
+  if (location.startsWith('/set-password')) return <SetPassword />;
   if (!user) return <Login />;
   return (
     <Layout onNewProject={() => setNewProject(true)}>

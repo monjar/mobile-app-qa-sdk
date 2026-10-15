@@ -1,8 +1,12 @@
 /**
  * Team management (admin-only) plus jobs and the audit log.
+ *
+ * Adding someone without a password invites them: they get an email with a
+ * link to choose one. Every link is also returned to the admin, who passes it
+ * on when the server can't send email.
  */
 import { Hono } from 'hono';
-import { JOB_STATES, SERVER_FEATURES, UserCreate, UserUpdate, type JobState, type ServerInfo } from '@snitch/contract';
+import { JOB_STATES, SERVER_FEATURES, UserCreate, UserUpdate, type AccountLink, type JobState, type ServerInfo, type UserCreated } from '@snitch/contract';
 import type { Deps } from '../../deps';
 import type { AppEnv } from '../../http/env';
 import { conflict, invalid, notFound } from '../../http/errors';
@@ -10,6 +14,7 @@ import { requireAdmin } from '../../http/session';
 import { jsonBody } from '../../http/validate';
 import { VERSION } from '../../version';
 import { backupStatus } from '../../worker/backup';
+import { LINK_TTL, sendAccountLink } from '../../mail/account';
 
 export function userRoutes(deps: Deps): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
@@ -31,9 +36,38 @@ export function userRoutes(deps: Deps): Hono<AppEnv> {
   app.post('/users', requireAdmin(), async (c) => {
     const body = await jsonBody(c, UserCreate);
     if (deps.users.getByEmail(body.email)) throw conflict('A user with that email already exists');
-    const user = await deps.users.create({ email: body.email, name: body.name ?? null, role: body.role, password: body.password });
-    deps.audit.add(c.get('user').id, 'user.created', user.id, { email: user.email, role: user.role }, c.get('ip'));
-    return c.json(user, 201);
+    const actor = c.get('user');
+    if (body.password !== undefined) {
+      const user = await deps.users.create({ email: body.email, name: body.name ?? null, role: body.role, password: body.password });
+      deps.audit.add(actor.id, 'user.created', user.id, { email: user.email, role: user.role }, c.get('ip'));
+      return c.json({ user, invite: null } satisfies UserCreated, 201);
+    }
+    const user = deps.users.createInvited({ email: body.email, name: body.name ?? null, role: body.role });
+    const invite = await sendAccountLink(deps, deps.users.get(user.id)!, 'invite', LINK_TTL.invite, actor);
+    deps.audit.add(actor.id, 'user.invited', user.id, { email: user.email, role: user.role, emailed: invite.emailed }, c.get('ip'));
+    return c.json({ user, invite } satisfies UserCreated, 201);
+  });
+
+  // A fresh invite link (the old one stops working), for someone who hasn't accepted yet.
+  app.post('/users/:id/invite', requireAdmin(), async (c) => {
+    const target = deps.users.get(c.req.param('id'));
+    if (!target) throw notFound('No such user');
+    if (!deps.users.view(target.id)!.pending) throw invalid('They already have a password; send a reset link instead');
+    if (target.disabled_at !== null) throw invalid('Enable them first');
+    const link = await sendAccountLink(deps, target, 'invite', LINK_TTL.invite, c.get('user'));
+    deps.audit.add(c.get('user').id, 'user.invite_resent', target.id, { emailed: link.emailed }, c.get('ip'));
+    return c.json(link satisfies AccountLink);
+  });
+
+  // A reset link for someone who forgot their password (or never had SMTP to ask for one).
+  app.post('/users/:id/reset-link', requireAdmin(), async (c) => {
+    const target = deps.users.get(c.req.param('id'));
+    if (!target) throw notFound('No such user');
+    if (target.disabled_at !== null) throw invalid('Enable them first');
+    if (deps.users.view(target.id)!.pending) throw invalid("They haven't accepted their invite yet; resend it instead");
+    const link = await sendAccountLink(deps, target, 'reset', LINK_TTL.adminReset, c.get('user'));
+    deps.audit.add(c.get('user').id, 'user.reset_link_sent', target.id, { emailed: link.emailed }, c.get('ip'));
+    return c.json(link satisfies AccountLink);
   });
 
   app.patch('/users/:id', requireAdmin(), async (c) => {

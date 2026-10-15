@@ -31,6 +31,8 @@ export interface UserView {
   createdAt: number;
   lastLoginAt: number | null;
   disabled: boolean;
+  /** Invited and hasn't set a password yet. */
+  pending: boolean;
 }
 
 export interface Me {
@@ -43,6 +45,8 @@ export interface AuthProviders {
   password: true;
   /** Sign in with GitHub (OAuth app configured through SNITCH_GITHUB_CLIENT_ID / _SECRET). */
   github: boolean;
+  /** "Forgot password?" can email a reset link (SMTP is configured). */
+  passwordReset: boolean;
 }
 
 export const LoginRequest = z.object({
@@ -57,9 +61,50 @@ export const UserCreate = z.object({
   email: z.email().max(254),
   name: z.string().max(120).optional(),
   role: UserRole,
-  password: z.string().min(PASSWORD_MIN_LENGTH).max(512),
+  /** Omit to invite: they get an email with a link to choose their own password. */
+  password: z.string().min(PASSWORD_MIN_LENGTH).max(512).optional(),
 });
 export type UserCreate = z.infer<typeof UserCreate>;
+
+/** A one-time link to choose a password: an invite, or a reset an admin sent. */
+export interface AccountLink {
+  url: string;
+  expiresAt: number;
+  /** False when the server can't send email (no SMTP) or the send failed: pass `url` on yourself. */
+  emailed: boolean;
+  /** Why the email didn't go out, when it didn't. */
+  error: string | null;
+}
+
+/** POST /users: the new user, and their invite when no password was set. */
+export interface UserCreated {
+  user: UserView;
+  invite: AccountLink | null;
+}
+
+/** POST /auth/password-reset: always answers 200, whether or not the email has an account. */
+export const PasswordResetRequest = z.object({ email: z.email().max(254) });
+export type PasswordResetRequest = z.infer<typeof PasswordResetRequest>;
+
+export const ACCOUNT_TOKEN_PURPOSES = ['invite', 'reset'] as const;
+export type AccountTokenPurpose = (typeof ACCOUNT_TOKEN_PURPOSES)[number];
+
+/** GET /auth/account-token?token=…: what a set-password link is for, while it's still valid. */
+export interface AccountTokenInfo {
+  purpose: AccountTokenPurpose;
+  email: string;
+  name: string | null;
+  expiresAt: number;
+}
+
+/** POST /auth/set-password: uses an invite or reset link once, and signs in. */
+export const SetPasswordRequest = z.object({
+  token: z.string().min(1).max(200),
+  password: z.string().min(PASSWORD_MIN_LENGTH).max(512),
+  /** Invites only: the name to show for them. */
+  name: z.string().max(120).optional(),
+});
+export type SetPasswordRequest = z.infer<typeof SetPasswordRequest>;
 
 export const UserUpdate = z
   .object({
@@ -382,6 +427,25 @@ export const TicketPatch = z
   })
   .partial();
 export type TicketPatch = z.infer<typeof TicketPatch>;
+
+const BulkIds = z.array(z.string().min(1).max(64)).min(1).max(200);
+
+/** POST /tickets/bulk: one change to many tickets. Deleting needs an admin. */
+export const TicketBulkRequest = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('assign'), ids: BulkIds, assigneeUserId: z.string().nullable() }),
+  z.object({ action: z.literal('status'), ids: BulkIds, status: TicketStatus }),
+  z.object({ action: z.literal('escalate'), ids: BulkIds, integrationId: z.string().min(1) }),
+  z.object({ action: z.literal('delete'), ids: BulkIds }),
+]);
+export type TicketBulkRequest = z.infer<typeof TicketBulkRequest>;
+export type TicketBulkAction = TicketBulkRequest['action'];
+
+export interface TicketBulkResult {
+  /** Tickets the action changed (or queued, for escalate). */
+  done: string[];
+  /** Tickets left alone, and why: not found, already escalated, another project's integration, nothing to change. */
+  skipped: { id: string; reason: string }[];
+}
 
 export const CommentCreate = z.object({ body: z.string().min(1).max(10_000) });
 export type CommentCreate = z.infer<typeof CommentCreate>;

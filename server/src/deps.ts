@@ -9,7 +9,7 @@ import type { Mailer } from './mail/mailer';
 import type { BlobStore } from './storage/blobStore';
 import type { Clock } from './util/clock';
 import type { ProjectsRepo } from './repo/projects';
-import type { AuditRepo, SessionsRepo, UsersRepo } from './repo/users';
+import type { AccountTokensRepo, AuditRepo, SessionsRepo, UsersRepo } from './repo/users';
 import type { TicketsRepo } from './repo/tickets';
 import type { IntegrationsRepo } from './repo/integrations';
 import type { JobsRepo } from './repo/jobs';
@@ -25,6 +25,8 @@ export interface Limiters {
   loginPerEmail: RateLimiter;
   /** Inbound GitHub webhooks, per client IP. */
   hooksPerIp: RateLimiter;
+  /** "Forgot password?" emails per address, so nobody can mail-bomb a colleague. */
+  resetEmailsPerAddress: RateLimiter;
 }
 
 export interface Deps {
@@ -43,6 +45,8 @@ export interface Deps {
   projects: ProjectsRepo;
   users: UsersRepo;
   sessions: SessionsRepo;
+  /** Invite and password-reset links. */
+  accountTokens: AccountTokensRepo;
   audit: AuditRepo;
   tickets: TicketsRepo;
   integrations: IntegrationsRepo;

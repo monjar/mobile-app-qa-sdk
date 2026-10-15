@@ -61,8 +61,8 @@ SNITCH_PUBLIC_URL=http://localhost:8080 SNITCH_DATA_DIR=./data node server/dist/
 | `SNITCH_SECRET_KEY` | generated into `<data>/secret.key` | Encrypts integration tokens at rest. ≥ 32 characters. Set it explicitly if your data volume is not private. |
 | `SNITCH_PREVIOUS_SECRET_KEY` | — | Old key during rotation; secrets are still readable with it. |
 | `SNITCH_BOOTSTRAP_ADMIN_EMAIL` / `_PASSWORD` | — | Creates the first admin on boot instead of the setup link. |
-| `SNITCH_SMTP_URL` | — | `smtp://user:pass@host:587` or `smtps://…:465`. Without it, email escalations fail with a clear error. |
-| `SNITCH_MAIL_FROM` | `Snitch <snitch@localhost>` | Sender for escalation emails. |
+| `SNITCH_SMTP_URL` | — | `smtp://user:pass@host:587` or `smtps://…:465`. Needed for invites, "Forgot password?", notifications and email escalations; without it, email escalations fail with a clear error and invite links are shown to the admin instead. |
+| `SNITCH_MAIL_FROM` | `Snitch <snitch@localhost>` | Sender for every email Snitch sends. |
 | `SNITCH_STORAGE` | `fs` | `fs` (data volume) or `s3`. |
 | `SNITCH_S3_ENDPOINT`, `_BUCKET`, `_REGION`, `_ACCESS_KEY_ID`, `_SECRET_ACCESS_KEY`, `_FORCE_PATH_STYLE` | — / `auto` / `true` | Any S3-compatible store (AWS, Cloudflare R2, SeaweedFS, Garage). |
 | `SNITCH_RETENTION_DAYS` | `90` | Tickets older than this are deleted with their media. `0` keeps everything. Projects can override. |
@@ -94,6 +94,14 @@ docker exec snitch snitch backup --out /data/backup-$(date +%F).db
 ```
 
 `project:create --ingest-key` lets you pick the key up front, so an app can be built with it before the server exists.
+
+## Triage in bulk
+
+In the inbox, tick tickets (or press <kbd>x</kbd> on the highlighted one; the checkbox above the list selects every
+loaded ticket) to assign them, move them to a status, escalate them or delete them together. Escalating needs the
+tickets to be from one project, since integrations belong to a project; tickets already escalated there are skipped.
+Deleting is for admins and removes the media for good. Assigning more than three tickets at once sends the assignee one
+email listing them instead of one each.
 
 ## Escalation
 
@@ -162,6 +170,20 @@ The project's **Devices** page lists those installs: app version and build, the 
 signals behind it, OS, model, whether Snitch was enabled for it, and how many reports it sent. Per build it shows how
 many installs checked in, by release type, so a build whose SDK never came up (wrong release type, missing key) stands
 out. Installs not seen for 180 days are forgotten.
+
+## Team, invites and passwords
+
+Admins add people under **Team**. By default that sends an invite: an email with a link to choose their own password,
+which works once, for 7 days (**Resend invite** replaces it). Untick **Email them an invite** to set a temporary password
+instead.
+
+Anyone can use **Forgot password?** on the sign-in page to get a reset link (valid for 1 hour, at most three emails per
+address an hour). The page answers the same whether or not the address has an account. Admins can also send someone a
+reset link from **Team → Reset password**; that one lasts 24 hours. Using a link signs out every other session of that
+user.
+
+All of this needs `SNITCH_SMTP_URL`. Without it the sign-in page tells people to ask an admin, and the dashboard shows the
+admin each invite or reset link to pass on themselves. Only the SHA-256 of a link's token is stored.
 
 ## Sign in with GitHub
 
