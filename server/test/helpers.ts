@@ -215,6 +215,16 @@ export class FakeGithub {
   readonly tokens = new Map<string, FakeGithubIdentity>();
   private nextIssue = 1;
   private nextComment = 9001;
+  /** A tiny Git data API: blobs, trees (path → blob sha), commits and branch refs. */
+  readonly blobs = new Map<string, Buffer>();
+  readonly trees = new Map<string, Map<string, string>>();
+  readonly commits = new Map<string, { tree: string; parents: string[]; message: string }>();
+  readonly refs = new Map<string, string>();
+  /** False: the token lacks Contents: write (403 on every git write). */
+  contentsWritable = true;
+  /** Statuses for the next ref updates, e.g. [422] for a branch that moved underneath. */
+  failRefUpdates: number[] = [];
+  private nextSha = 1;
 
   constructor(
     readonly owner = 'monjar',
@@ -232,6 +242,64 @@ export class FakeGithub {
 
   writes(): { method: string; path: string; body: unknown }[] {
     return this.calls.filter((c) => c.method !== 'GET');
+  }
+
+  /** A file's bytes on `branch`, or null. */
+  fileAt(branch: string, path: string): Buffer | null {
+    const head = this.refs.get(branch);
+    const blob = head ? this.trees.get(this.commits.get(head)!.tree)!.get(path) : undefined;
+    return blob ? this.blobs.get(blob)! : null;
+  }
+
+  private sha(): string {
+    return (this.nextSha++).toString(16).padStart(40, '0');
+  }
+
+  private git(rest: string, method: string, body: Record<string, unknown> | null): Response | null {
+    if (rest === '' && method === 'GET') return Response.json({ full_name: `${this.owner}/${this.repo}`, html_url: `${this.web}/${this.owner}/${this.repo}`, has_issues: true });
+    if (!rest.startsWith('/git/')) return null;
+    if (method !== 'GET' && !this.contentsWritable) return Response.json({ message: 'Resource not accessible by personal access token' }, { status: 403 });
+    if (rest === '/git/blobs' && method === 'POST') {
+      const sha = this.sha();
+      this.blobs.set(sha, Buffer.from(String(body?.content), 'base64'));
+      return Response.json({ sha }, { status: 201 });
+    }
+    if (rest === '/git/trees' && method === 'POST') {
+      const tree = new Map(body?.base_tree ? this.trees.get(String(body.base_tree)) : []);
+      for (const e of body?.tree as { path: string; sha: string }[]) tree.set(e.path, e.sha);
+      const sha = this.sha();
+      this.trees.set(sha, tree);
+      return Response.json({ sha }, { status: 201 });
+    }
+    if (rest === '/git/commits' && method === 'POST') {
+      const sha = this.sha();
+      this.commits.set(sha, { tree: String(body?.tree), parents: body?.parents as string[], message: String(body?.message) });
+      return Response.json({ sha }, { status: 201 });
+    }
+    const commit = /^\/git\/commits\/(\w+)$/.exec(rest);
+    if (commit && method === 'GET') {
+      const c = this.commits.get(commit[1]!);
+      return c ? Response.json({ sha: commit[1], tree: { sha: c.tree } }) : Response.json({ message: 'Not Found' }, { status: 404 });
+    }
+    const ref = /^\/git\/(?:ref|refs)\/heads\/(.+)$/.exec(rest);
+    if (ref && method === 'GET') {
+      const sha = this.refs.get(ref[1]!);
+      return sha ? Response.json({ ref: `refs/heads/${ref[1]}`, object: { sha } }) : Response.json({ message: 'Not Found' }, { status: 404 });
+    }
+    if (ref && method === 'PATCH') {
+      if (this.failRefUpdates.length) return Response.json({ message: 'Update is not a fast forward' }, { status: this.failRefUpdates.shift()! });
+      const next = String(body?.sha);
+      if (!this.commits.get(next)?.parents.includes(this.refs.get(ref[1]!) ?? '')) return Response.json({ message: 'Update is not a fast forward' }, { status: 422 });
+      this.refs.set(ref[1]!, next);
+      return Response.json({ ref: `refs/heads/${ref[1]}`, object: { sha: next } });
+    }
+    if (rest === '/git/refs' && method === 'POST') {
+      const name = String(body?.ref).replace(/^refs\/heads\//, '');
+      if (this.refs.has(name)) return Response.json({ message: 'Reference already exists' }, { status: 422 });
+      this.refs.set(name, String(body?.sha));
+      return Response.json({ ref: body?.ref, object: { sha: body?.sha } }, { status: 201 });
+    }
+    return Response.json({ message: 'Not Found' }, { status: 404 });
   }
 
   readonly handle: FetchHandler = (url, init) => {
@@ -265,6 +333,8 @@ export class FakeGithub {
     if (!path.startsWith(repoPath)) return Response.json({ message: 'Not Found' }, { status: 404 });
     const rest = path.slice(repoPath.length);
     if (method !== 'GET' && this.failWrites.length) return new Response('upstream sad', { status: this.failWrites.shift()! });
+    const git = this.git(rest, method, body);
+    if (git) return git;
     if (rest === '/issues' && method === 'POST') {
       const issue: FakeIssue = { number: this.nextIssue++, title: String(body?.title), body: String(body?.body), state: 'open', stateReason: null, comments: [] };
       this.issues.set(issue.number, issue);

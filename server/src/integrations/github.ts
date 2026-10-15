@@ -1,11 +1,14 @@
 /**
  * Creates a GitHub issue for a ticket with a fine-grained PAT (Issues: write).
  *
- * GitHub has no API for issue attachments, so media is either linked through
- * Snitch share links (opt-in) or left in the dashboard. A hidden marker in the
- * body lets a retry find the issue a previous, half-finished attempt created.
+ * GitHub has no API for issue attachments, so media (githubMediaMode) is
+ * committed to the repo's snitch-media branch (githubMedia.ts; Contents: write),
+ * linked through public Snitch share links, or left in the dashboard. If the
+ * commit is refused (permissions, an empty repo), the issue still goes out and
+ * links to Snitch, and the ticket notes why. A hidden marker in the body lets
+ * a retry find the issue a previous, half-finished attempt created.
  */
-import { GithubConfig } from '@snitch/contract';
+import { GithubConfig, githubMediaMode } from '@snitch/contract';
 import type { Deps } from '../deps';
 import type { IntegrationRow } from '../repo/integrations';
 import type { TicketRow } from '../repo/tickets';
@@ -13,6 +16,7 @@ import { buildTicketContext } from './context';
 import { classifyHttp, SendError } from './errors';
 import { GITHUB_MARKER, githubIssue } from './render';
 import { loadBeforeReport } from './timeline';
+import { mediaFileName, mediaFiles, uploadToRepo } from './githubMedia';
 import { VERSION } from '../version';
 
 export interface SendResult {
@@ -48,8 +52,29 @@ export async function sendGithub(deps: Deps, integration: IntegrationRow, ticket
   const existing = await findExisting(deps, api, cfg.owner, cfg.repo, token, ticket.id);
   if (existing) return existing;
 
-  const ctx = buildTicketContext(deps, ticket, { enabled: cfg.includeShareLinks, ttlDays: cfg.shareTtlDays, userId, integration });
+  const media = githubMediaMode(cfg);
+  const ctx = buildTicketContext(deps, ticket, { enabled: media === 'links', ttlDays: cfg.shareTtlDays, userId, integration });
   ctx.render.beforeReport = await loadBeforeReport(deps, ticket, ctx.attachments);
+  if (media === 'repo') {
+    const attachments = mediaFiles(ctx.attachments);
+    if (attachments.length > 0) {
+      try {
+        const files = await Promise.all(attachments.map(async (a) => ({ name: mediaFileName(a), content: await deps.blobs.readAll(a.storage_key!) })));
+        const uploaded = await uploadToRepo(deps, cfg, token, ctx.render.key, files);
+        const urlOf = (a: (typeof attachments)[number] | null) => (a && attachments.includes(a) ? uploaded.urls[mediaFileName(a)] : undefined);
+        const shown = new Set([ctx.screenshot, ctx.video]);
+        ctx.render.links = {
+          screenshot: urlOf(ctx.screenshot),
+          video: urlOf(ctx.video),
+          files: attachments.filter((a) => !shown.has(a)).map((a) => ({ name: mediaFileName(a), url: uploaded.urls[mediaFileName(a)]! })),
+        };
+      } catch (e) {
+        // A transient failure retries the whole escalation; a refusal (no Contents: write, empty repo) sends the issue without media.
+        if (!(e instanceof SendError) || e.retryable) throw e;
+        deps.tickets.addEvent(ticket.id, { type: 'integration' }, 'media_upload_failed', { integrationId: integration.id, integration: integration.name, error: e.message });
+      }
+    }
+  }
   const { title, body } = githubIssue(ctx.render);
   const labels = [...new Set([...cfg.labels, `type:${ticket.type}`])];
   let res: Response;

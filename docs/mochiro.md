@@ -85,12 +85,15 @@ Then, in the dashboard at `https://mochiro-snitch.fly.dev`:
 
 1. **Mochiro → Settings → General → Accepted app ids**: `com.mochiro.app`
 2. **Integrations**:
-   - GitHub, repo `Pamirmali/mochiro-mobile`, with a fine-grained PAT that has *Issues: write*.
+   - GitHub, repo `Pamirmali/mochiro-mobile`, with a fine-grained PAT that has *Issues: write* and *Contents: write*,
+     media *Committed to the repository*: the screenshot and video then show in the issue for anyone with access to the
+     (private) repo and nobody else. To keep `snitch-media` out of everyone's clones, point *Keep them in another
+     repository* at a separate private repo (for example `Pamirmali/mochiro-qa-media`) the PAT can also write to.
    - Optionally email or Slack.
 3. **Routing**: *Bug → GitHub (automatically)*, *Idea → email (suggest)*.
 
-Leave *Include public links* off for GitHub. Mochiro's screens show health and personal data, so media should stay
-behind the dashboard login.
+Don't pick *Public links* for GitHub. Mochiro's screens show health and personal data, so media should stay behind a
+login: Snitch's, or GitHub's for a private repository.
 
 ## Shipping
 

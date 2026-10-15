@@ -2,7 +2,7 @@
  * One ticket: what the tester said and saw, where it came from, what happened
  * to it since, and where to send it next.
  */
-import { useCallback, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation } from 'wouter';
 import {
@@ -305,23 +305,36 @@ function Row({ k, v, mono }: { k: string; v: string; mono?: boolean }) {
   );
 }
 
+/** A one-line title that wraps instead of scrolling sideways (a textarea sized to its text; Enter saves). */
 function TitleEditor({ value, onSave }: { value: string; onSave: (v: string) => void }) {
   const [v, setV] = useState(value);
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [v]);
   const commit = () => {
     const next = v.trim();
     if (next && next !== value) onSave(next);
     else setV(value);
   };
   return (
-    <input
+    <textarea
+      ref={ref}
       className="title-input"
       aria-label="Title"
+      rows={1}
       value={v}
       maxLength={200}
-      onChange={(e) => setV(e.target.value)}
+      onChange={(e) => setV(e.target.value.replace(/\s*\n\s*/g, ' '))}
       onBlur={commit}
       onKeyDown={(e) => {
-        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          e.currentTarget.blur();
+        }
         if (e.key === 'Escape') setV(value);
       }}
     />
@@ -613,6 +626,8 @@ function describe(e: TicketEventView, typeLabel: (id: string) => string, userNam
       return 'commented on GitHub';
     case 'notification_sent':
       return `Emailed the ${str(d.to) || 'recipient'}${str(d.email) ? ` (${str(d.email)})` : ''}`;
+    case 'media_upload_failed':
+      return `Couldn't put the media on GitHub for ${str(d.integration) || 'the issue'}, so it links to Snitch: ${str(d.error)}`;
     case 'notification_failed':
       return `Couldn't email the ${str(d.to) || 'recipient'}${str(d.email) ? ` (${str(d.email)})` : ''}${str(d.error) ? `: ${str(d.error)}` : ''}`;
     case 'duplicate_marked':

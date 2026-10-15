@@ -107,10 +107,11 @@ email listing them instead of one each.
 
 Integrations are configured per project in the dashboard (**Settings → Integrations**):
 
-- **GitHub**: a fine-grained personal access token restricted to the target repository with *Issues: Read and write*.
-  The issue body contains the description, a device table and a link to the ticket. GitHub has no attachment API;
-  tick *Include public links* to embed the screenshot and link the video through expiring share links. That option
-  is off by default because GitHub caches images and your reports may show personal data.
+- **GitHub**: a fine-grained personal access token restricted to the target repository with *Issues: Read and write*
+  (plus *Contents: Read and write* when the media goes into the repository; see below).
+  The issue body contains the description, the screenshot, the video, a device table, what happened just before
+  the report (errors and failed requests from the timeline) and a link to the ticket. See
+  [Media in GitHub issues](#media-in-github-issues).
 - **Email**: needs `SNITCH_SMTP_URL`. The screenshot is attached inline, and the video is linked.
 - **Webhook**: `slack` (incoming webhook), `discord`, or `generic` JSON. Generic payloads are signed:
   `X-Snitch-Signature: sha256=HMAC_SHA256(secret, "<X-Snitch-Timestamp>.<raw body>")`.
@@ -123,6 +124,30 @@ After 8 attempts, or immediately for permanent errors such as a revoked token, t
 When a report carries a timeline (SDK 0.3), GitHub issues and emails get a short **Before the report** section: the
 screen the tester was on, and the last ten error log lines and failed requests, one line each. The full timeline stays in
 the dashboard.
+
+### Media in GitHub issues
+
+GitHub has no API for issue attachments, so each GitHub integration picks one of three ways to show the screenshot and
+video (**Settings → Integrations → Edit**):
+
+- **Committed to the repository** (the default for new integrations). Snitch commits the report's screenshot, video,
+  timeline and logs to the `snitch-media` branch under the ticket's key (`MOCH-42/screenshot.jpg`), one commit per
+  report, and the issue shows the screenshot and links the rest. GitHub only serves those files to people who can see
+  the repository, so a private repo keeps them private, and someone reading the issue (or an agent working on it)
+  needs nothing from Snitch. The token needs *Contents: Read and write* as well. Things to know:
+  - The files stay in the branch's history; deleting a ticket in Snitch doesn't remove them. Delete the branch to
+    purge everything.
+  - A plain `git clone` downloads every branch, so the media adds to every full clone of the repo (CI checkouts of one
+    branch are unaffected). To avoid that, set *Keep them in another repository* to a separate (private) repo the
+    token can write to; the issue links there instead.
+  - If the commit is refused (no *Contents* permission, an empty repository), the issue is still created, says the
+    media is in Snitch, and the ticket records why.
+- **Public links**: expiring Snitch share links (30 days). Anyone with a link can open it, and GitHub's image proxy
+  caches the screenshot.
+- **Not included**: the issue says the media is in Snitch.
+
+Integrations created before 0.4 keep what they had: public links if *Include public links* was ticked, otherwise not
+included.
 
 ### GitHub two-way sync
 

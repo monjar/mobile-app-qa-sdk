@@ -358,6 +358,8 @@ export const TICKET_EVENT_KINDS = [
   'notification_failed',
   /** The ticket was marked a duplicate; data: { duplicateOfId, key }. */
   'duplicate_marked',
+  /** Media couldn't be committed to GitHub, so the issue links to Snitch instead; data: { integrationId, integration, error }. */
+  'media_upload_failed',
 ] as const;
 export type TicketEventKind = (typeof TICKET_EVENT_KINDS)[number];
 
@@ -458,12 +460,31 @@ export type ShareLinkCreate = z.infer<typeof ShareLinkCreate>;
 
 // ── Integrations & routing ──────────────────────────────────────────────────
 
+/**
+ * How a GitHub issue shows the report's media:
+ * - `repo`: the screenshot, video, timeline and logs are committed to the GITHUB_MEDIA_BRANCH branch of the
+ *   repository (or of `mediaRepo`), so whoever can see the repo sees them in the issue and nobody else does.
+ *   The token needs Contents: write.
+ * - `links`: public, expiring Snitch share links (GitHub's image proxy caches them).
+ * - `none`: the issue says the media is in Snitch.
+ */
+export const GITHUB_MEDIA_MODES = ['repo', 'links', 'none'] as const;
+export type GithubMediaMode = (typeof GITHUB_MEDIA_MODES)[number];
+export const GITHUB_MEDIA_BRANCH = 'snitch-media';
+
 export const GithubConfig = z.object({
   owner: z.string().regex(/^[A-Za-z0-9-]{1,39}$/),
   repo: z.string().regex(/^[A-Za-z0-9._-]{1,100}$/),
   labels: z.array(z.string().min(1).max(50)).max(10).default([]),
   assignees: z.array(z.string().min(1).max(39)).max(10).default([]),
-  /** Put public, expiring share links to the screenshot/video in the issue. Off by default: GitHub caches images. */
+  /** Unset on integrations saved before 0.4: `links` when includeShareLinks is on, else `none` (githubMediaMode). */
+  media: z.enum(GITHUB_MEDIA_MODES).optional(),
+  /** `repo` media: keep it in this repository ("owner/name") instead, so clones of the app's repo stay small. */
+  mediaRepo: z
+    .string()
+    .regex(/^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/)
+    .optional(),
+  /** Before 0.4: put public, expiring share links to the screenshot/video in the issue. `media: 'links'` now. */
   includeShareLinks: z.boolean().default(false),
   shareTtlDays: z.number().int().min(1).max(365).default(30),
   /** Override for GitHub Enterprise; defaults to https://api.github.com. */
@@ -477,6 +498,10 @@ export const GithubConfig = z.object({
   syncComments: z.boolean().default(false),
 });
 export type GithubConfig = z.infer<typeof GithubConfig>;
+
+export function githubMediaMode(cfg: Pick<GithubConfig, 'media' | 'includeShareLinks'>): GithubMediaMode {
+  return cfg.media ?? (cfg.includeShareLinks ? 'links' : 'none');
+}
 
 export const EmailConfig = z.object({
   to: z.array(z.email()).min(1).max(20),

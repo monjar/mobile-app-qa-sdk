@@ -6,6 +6,9 @@ import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 're
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation } from 'wouter';
 import {
+  GITHUB_MEDIA_BRANCH,
+  githubMediaMode,
+  type GithubMediaMode,
   CAPTURE_MODES,
   DEFAULT_SDK_CONFIG,
   PLATFORMS,
@@ -540,7 +543,9 @@ function describeIntegration(i: IntegrationView): string {
   const c = i.config as Record<string, unknown>;
   if (i.kind === 'github') {
     const sync = [c.syncStatus && 'status', c.syncComments && 'comments'].filter(Boolean).join(' and ');
-    return `${String(c.owner)}/${String(c.repo)}${c.includeShareLinks ? ' · with public media links' : ''}${sync ? ` · syncs ${sync}` : ''}`;
+    const media = githubMediaMode(i.config as GithubConfig);
+    const mediaText = media === 'repo' ? ` · media in ${String(c.mediaRepo ?? `${String(c.owner)}/${String(c.repo)}`)}` : media === 'links' ? ' · with public media links' : '';
+    return `${String(c.owner)}/${String(c.repo)}${mediaText}${sync ? ` · syncs ${sync}` : ''}`;
   }
   if (i.kind === 'email') return (c.to as string[]).join(', ');
   return `${String(c.format)} · ${(() => {
@@ -563,6 +568,9 @@ function IntegrationDialog({ kind, existing, projectId, onClose, onSaved }: { ki
   const [labels, setLabels] = useState(gh ? gh.labels.join(', ') : 'bug-report');
   const [token, setToken] = useState('');
   const [shareLinks, setShareLinks] = useState(gh?.includeShareLinks ?? wh?.includeShareLinks ?? false);
+  // New GitHub integrations put the media in the repo; older ones keep what they had.
+  const [media, setMedia] = useState<GithubMediaMode>(gh ? githubMediaMode(gh) : 'repo');
+  const [mediaRepo, setMediaRepo] = useState(gh?.mediaRepo ?? '');
   const [syncStatus, setSyncStatus] = useState(gh?.syncStatus ?? false);
   const [syncComments, setSyncComments] = useState(gh?.syncComments ?? false);
   const [to, setTo] = useState(em ? em.to.join(', ') : '');
@@ -589,7 +597,19 @@ function IntegrationDialog({ kind, existing, projectId, onClose, onSaved }: { ki
         kind,
         name,
         secret: token.trim(),
-        config: { ...gh, owner: owner.trim(), repo: repo.trim(), labels: list(labels), assignees: gh?.assignees ?? [], includeShareLinks: shareLinks, shareTtlDays: gh?.shareTtlDays ?? 30, syncStatus, syncComments },
+        config: {
+          ...gh,
+          owner: owner.trim(),
+          repo: repo.trim(),
+          labels: list(labels),
+          assignees: gh?.assignees ?? [],
+          media,
+          mediaRepo: media === 'repo' && mediaRepo.trim() ? mediaRepo.trim() : undefined,
+          includeShareLinks: media === 'links',
+          shareTtlDays: gh?.shareTtlDays ?? 30,
+          syncStatus,
+          syncComments,
+        },
       });
     else if (kind === 'email') save.mutate({ kind, name, config: { ...em, to: list(to), subjectPrefix: em?.subjectPrefix ?? '[Snitch]' } });
     else save.mutate({ kind, name, config: { ...wh, url: url.trim(), format, includeShareLinks: shareLinks, shareTtlDays: wh?.shareTtlDays ?? 30 }, ...(format === 'generic' && secret ? { secret } : {}) });
@@ -637,13 +657,50 @@ function IntegrationDialog({ kind, existing, projectId, onClose, onSaved }: { ki
                 autoComplete="off"
                 placeholder={existing ? 'Leave empty to keep the current token' : 'github_pat_…'}
               />
-              <span className="field-hint">A fine-grained personal access token for this repository with “Issues: Read and write”. Stored encrypted.</span>
+              <span className="field-hint">
+                A fine-grained personal access token for this repository with “Issues: Read and write”
+                {media === 'repo' ? ', plus “Contents: Read and write” for the media' : ''}. Stored encrypted.
+              </span>
             </label>
             <label className="field">
               Labels
               <input value={labels} onChange={(e) => setLabels(e.target.value)} placeholder="bug-report, qa" />
               <span className="field-hint">Comma-separated. A type:… label is added automatically.</span>
             </label>
+            <fieldset className="fieldset">
+              <legend>Screenshot and video in the issue</legend>
+              <label className="check block">
+                <input type="radio" name="media" checked={media === 'repo'} onChange={() => setMedia('repo')} />
+                <span>
+                  Committed to the repository
+                  <span className="field-hint">
+                    Shown in the issue to people who can see the repository, and to nobody else. The files (screenshot, video, timeline, logs) go to the {GITHUB_MEDIA_BRANCH} branch and stay in
+                    its history.
+                  </span>
+                </span>
+              </label>
+              {media === 'repo' && (
+                <label className="field" style={{ marginLeft: 24 }}>
+                  Keep them in another repository (optional)
+                  <input value={mediaRepo} onChange={(e) => setMediaRepo(e.target.value)} placeholder={`${owner || 'owner'}/qa-media`} pattern="[A-Za-z0-9-]+/[A-Za-z0-9._-]+" />
+                  <span className="field-hint">A plain git clone downloads every branch; a separate repo keeps the app's clones small. The token needs Contents access there.</span>
+                </label>
+              )}
+              <label className="check block">
+                <input type="radio" name="media" checked={media === 'links'} onChange={() => setMedia('links')} />
+                <span>
+                  Public links
+                  <span className="field-hint">Anyone with a link can open it for 30 days, and GitHub caches the images.</span>
+                </span>
+              </label>
+              <label className="check block">
+                <input type="radio" name="media" checked={media === 'none'} onChange={() => setMedia('none')} />
+                <span>
+                  Not included
+                  <span className="field-hint">The issue says they're in Snitch.</span>
+                </span>
+              </label>
+            </fieldset>
             <fieldset className="fieldset">
               <legend>Two-way sync</legend>
               <label className="check block">
@@ -694,7 +751,7 @@ function IntegrationDialog({ kind, existing, projectId, onClose, onSaved }: { ki
             )}
           </>
         )}
-        {kind !== 'email' && (
+        {kind === 'webhook' && (
           <label className="check">
             <input type="checkbox" checked={shareLinks} onChange={(e) => setShareLinks(e.target.checked)} />
             Include public links to the screenshot and video (expire after 30 days)

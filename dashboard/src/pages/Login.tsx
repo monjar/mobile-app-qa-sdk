@@ -80,16 +80,14 @@ export function Login() {
             <input type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
           </label>
           <label className="field">
-            <span className="row" style={{ justifyContent: 'space-between' }}>
-              Password
-              {providers.data?.passwordReset && (
-                <button type="button" className="link-button small" onClick={() => setForgot(true)}>
-                  Forgot password?
-                </button>
-              )}
-            </span>
+            Password
             <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
           </label>
+          {providers.data?.passwordReset && (
+            <button type="button" className="link-button small" style={{ alignSelf: 'flex-end', marginTop: -6 }} onClick={() => setForgot(true)}>
+              Forgot password?
+            </button>
+          )}
           {error && <div className="error-text">{error}</div>}
           <button className="primary" type="submit" disabled={busy}>
             {busy ? 'Signing in…' : 'Sign in'}

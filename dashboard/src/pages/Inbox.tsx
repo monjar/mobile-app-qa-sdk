@@ -175,7 +175,7 @@ export function Inbox() {
                 </label>
                 <Link href={`/tickets/${t.id}`} className="ticket-row">
                   <span className="ticket-key">{t.key}</span>
-                  <span style={{ minWidth: 0 }}>
+                  <span className="ticket-main">
                     <div className="ticket-title">{t.title}</div>
                     <div className="ticket-meta">
                       <StatusPill status={t.status} />
