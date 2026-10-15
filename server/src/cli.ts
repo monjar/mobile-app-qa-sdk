@@ -78,7 +78,8 @@ async function main(): Promise<void> {
       const user = deps.users.getByEmail(email) ?? fail(`no user ${email}`);
       await deps.users.update(user.id, { password, disabled: false });
       deps.sessions.deleteForUser(user.id);
-      deps.audit.add(null, 'user.updated', user.id, { passwordReset: true, via: 'cli' });
+      const tokensRevoked = deps.apiTokens.revokeForUser(user.id);
+      deps.audit.add(null, 'user.updated', user.id, { passwordReset: true, via: 'cli', ...(tokensRevoked ? { tokensRevoked } : {}) });
       process.stdout.write(`Password reset for ${email}\n`);
       break;
     }

@@ -4,7 +4,7 @@
  *
  *   /health, /health/ready   liveness / readiness
  *   /api/v1/*                SDK: config, reports, attachments (ingest key)
- *   /api/admin/*             dashboard API (session cookie + CSRF)
+ *   /api/admin/*             dashboard API (session cookie + CSRF), and some of it for API tokens (Bearer)
  *   /api/hooks/*             signed inbound webhooks (GitHub issue sync)
  *   /s/:token                public share links
  *   everything else          the dashboard SPA
@@ -16,7 +16,7 @@ import type { AppEnv } from './http/env';
 import { clientIp } from './http/clientIp';
 import { errorBody, HttpError, sendError } from './http/errors';
 import { securityHeaders } from './http/securityHeaders';
-import { requireSession } from './http/session';
+import { requireAuth } from './http/apiAuth';
 import { errorMessage, log } from './log';
 import { ingestRoutes } from './routes/ingest';
 import { hookRoutes } from './routes/hooks';
@@ -24,6 +24,7 @@ import { authRoutes } from './routes/admin/auth';
 import { ticketRoutes } from './routes/admin/tickets';
 import { projectRoutes } from './routes/admin/projects';
 import { userRoutes } from './routes/admin/users';
+import { tokenRoutes } from './routes/admin/tokens';
 import { shareRoutes } from './routes/share';
 import { spaRoutes } from './routes/spa';
 import { VERSION } from './version';
@@ -62,10 +63,12 @@ export function buildApp(deps: Deps): Hono<AppEnv> {
 
   const admin = new Hono<AppEnv>();
   admin.route('/auth', authRoutes(deps));
-  admin.use('*', async (c, next) => (c.req.path.startsWith('/api/admin/auth/') ? next() : requireSession(deps)(c, next)));
+  const auth = requireAuth(deps);
+  admin.use('*', async (c, next) => (c.req.path.startsWith('/api/admin/auth/') ? next() : auth(c, next)));
   admin.route('/', ticketRoutes(deps));
   admin.route('/', projectRoutes(deps));
   admin.route('/', userRoutes(deps));
+  admin.route('/', tokenRoutes(deps));
   app.route('/api/admin', admin);
 
   app.route('/s', shareRoutes(deps));

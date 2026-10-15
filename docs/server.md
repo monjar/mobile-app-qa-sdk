@@ -83,7 +83,8 @@ SNITCH_PUBLIC_URL=http://localhost:8080 SNITCH_DATA_DIR=./data node server/dist/
 
 ## The CLI
 
-Inside the container the `snitch` command is on the `PATH`:
+Inside the container the `snitch` admin command is on the `PATH`. (For reading tickets from your own machine or a
+coding agent, see the [snitch CLI and MCP server](cli.md) instead.)
 
 ```sh
 docker exec snitch snitch user:create --email you@example.com --password '…' --role admin
@@ -168,12 +169,17 @@ Changes from Snitch need nothing more than the token (*Issues: Read and write*).
    - Payload URL: the URL from step 1.
    - Content type: `application/json`.
    - Secret: the secret from step 1.
-   - Events: **Let me select individual events** → tick **Issues** and **Issue comments** (untick *Pushes*).
+   - Events: **Let me select individual events** → tick **Issues**, **Issue comments** and **Pull requests** (untick
+     *Pushes*).
 3. Save. GitHub sends a ping, which Snitch answers with `204`; **Recent Deliveries** shows what Snitch did with each
    later event.
 
 Deliveries without a valid `X-Hub-Signature-256` are refused. Creating a new secret replaces the old one immediately, so
 paste it into GitHub right away. Snitch never re-imports what it posted itself, so nothing loops.
+
+With **Pull requests** ticked, a pull request that says it fixes the issue (`Fixes #123` and GitHub's other closing
+keywords) is recorded on the ticket when it's opened, merged or closed. That needs neither switch, and changes no
+status: merging closes the issue, and **Sync status** takes it from there.
 
 ## Notifications
 
@@ -205,10 +211,18 @@ instead.
 Anyone can use **Forgot password?** on the sign-in page to get a reset link (valid for 1 hour, at most three emails per
 address an hour). The page answers the same whether or not the address has an account. Admins can also send someone a
 reset link from **Team → Reset password**; that one lasts 24 hours. Using a link signs out every other session of that
-user.
+user and revokes their [API tokens](cli.md#api-tokens).
 
 All of this needs `SNITCH_SMTP_URL`. Without it the sign-in page tells people to ask an admin, and the dashboard shows the
 admin each invite or reset link to pass on themselves. Only the SHA-256 of a link's token is stored.
+
+## API tokens and the snitch CLI
+
+Everyone has an **API tokens** page for personal tokens (`tickets:read`, `tickets:write`) used by the
+[snitch CLI](cli.md), its MCP server for coding agents, and scripts. `snitch login` makes one through device sign-in:
+the terminal shows a code, and the user approves it on the dashboard's `/device` page. Tokens can't manage users,
+projects, integrations or other tokens. Disabling a person or resetting their password revokes theirs. Writes made with a token are audited as
+`api_token.write`.
 
 ## Sign in with GitHub
 

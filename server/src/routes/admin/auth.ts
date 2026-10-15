@@ -2,6 +2,9 @@
  * Login (password, or GitHub in githubLogin.ts), logout, current user, first-run
  * setup, and the set-password links behind invites and "Forgot password?".
  *
+ * Device sign-in (`snitch login`, contract DeviceCodeRequest): /device starts one,
+ * /device/token polls it. Approving happens in the dashboard (routes/admin/tokens.ts).
+ *
  * First run: with no users and no SNITCH_BOOTSTRAP_ADMIN_* env, the server
  * logs a one-time setup URL; whoever opens it creates the first admin. The
  * token keeps a freshly exposed server from being claimed by a stranger.
@@ -14,12 +17,16 @@ import { Hono } from 'hono';
 import { getCookie } from 'hono/cookie';
 import { z } from 'zod';
 import {
+  DeviceCodeRequest,
+  DeviceTokenRequest,
   LoginRequest,
   PASSWORD_MIN_LENGTH,
   PasswordResetRequest,
   SetPasswordRequest,
   type AccountTokenInfo,
   type AuthProviders,
+  type DeviceCodeIssued,
+  type DeviceTokenResult,
   type Me,
 } from '@snitch/contract';
 import type { Deps } from '../../deps';
@@ -32,6 +39,7 @@ import { safeEqual } from '../../crypto/tokens';
 import { toUserView } from '../../repo/users';
 import { LINK_TTL, sendAccountLink } from '../../mail/account';
 import { githubLoginRoutes } from './githubLogin';
+import { DEFAULT_TOKEN_DAYS, toApiTokenView } from '../../repo/apiTokens';
 
 const SetupRequest = z.object({
   token: z.string().min(1).max(200),
@@ -107,8 +115,10 @@ export function authRoutes(deps: Deps): Hono<AppEnv> {
     const { row, user } = found;
     const name = row.purpose === 'invite' && body.name?.trim() ? body.name.trim() : undefined;
     await deps.users.update(user.id, { password: body.password, ...(name ? { name } : {}) });
-    // A new password signs every other browser out.
+    // A new password signs every other browser out, and ends every API token (the CLI signs in again).
     deps.sessions.deleteForUser(user.id);
+    const tokensRevoked = deps.apiTokens.revokeForUser(user.id);
+    if (tokensRevoked) deps.audit.add(user.id, 'api_token.revoked', null, { count: tokensRevoked, by: row.purpose === 'invite' ? 'invite.accepted' : 'password.reset' }, c.get('ip'));
     deps.limiters.loginPerEmail.reset(user.email.toLowerCase());
     const fresh = deps.users.get(user.id)!;
     return c.json(startSession(c, deps, fresh, row.purpose === 'invite' ? 'invite.accepted' : 'password.reset') satisfies Me);
@@ -119,6 +129,43 @@ export function authRoutes(deps: Deps): Hono<AppEnv> {
     if (token) deps.sessions.delete(token);
     clearSessionCookie(c, deps);
     return c.json({ ok: true });
+  });
+
+  app.post('/device', async (c) => {
+    deps.limiters.deviceCodesPerIp.enforce(c.get('ip'), 'Too many sign-in requests; try again later');
+    const body = await jsonBody(c, DeviceCodeRequest);
+    const days = body.expiresInDays === undefined ? DEFAULT_TOKEN_DAYS : body.expiresInDays;
+    const d = deps.deviceCodes.create({ clientName: body.clientName, scopes: body.scopes, days, ip: c.get('ip') });
+    const verificationUrl = `${deps.config.publicUrl}/device`;
+    return c.json(
+      {
+        deviceCode: d.deviceCode,
+        userCode: d.userCode,
+        verificationUrl,
+        verificationUrlComplete: `${verificationUrl}?code=${d.userCode}`,
+        expiresIn: Math.round((d.expiresAt - deps.now()) / 1000),
+        interval: d.interval,
+      } satisfies DeviceCodeIssued,
+      201,
+    );
+  });
+
+  app.post('/device/token', async (c) => {
+    deps.limiters.devicePollsPerIp.enforce(c.get('ip'), 'Polling too fast; slow down');
+    const body = await jsonBody(c, DeviceTokenRequest);
+    const result = deps.deviceCodes.poll(body.deviceCode, (req) => {
+      const { token, row } = deps.apiTokens.create(req.userId, { name: req.clientName, scopes: req.scopes, days: req.days, viaDevice: true });
+      return { tokenId: row.id, token, row };
+    });
+    if (result.status !== 'approved') return c.json({ status: result.status } satisfies DeviceTokenResult);
+    const { token, row } = result.minted;
+    const user = deps.users.get(row.user_id);
+    if (!user || user.disabled_at !== null) {
+      deps.apiTokens.revoke(row.id);
+      return c.json({ status: 'denied' } satisfies DeviceTokenResult);
+    }
+    deps.audit.add(user.id, 'api_token.created', row.id, { name: row.name, scopes: toApiTokenView(row).scopes, expiresAt: row.expires_at, via: 'device' }, c.get('ip'));
+    return c.json({ status: 'approved', token, view: toApiTokenView(row), user: toUserView(user) } satisfies DeviceTokenResult);
   });
 
   app.get('/me', (c) => {

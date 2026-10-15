@@ -1,7 +1,7 @@
 name: js
 
-# Contract, server and dashboard: typecheck, unit/integration tests, and the
-# Playwright end-to-end suite against the real server bundle.
+# Contract, server, dashboard and CLI: typecheck, unit/integration tests, and the
+# Playwright end-to-end suite against the real server bundle (and the CLI bundle).
 on:
   push:
     branches: ["**"]

@@ -71,6 +71,15 @@ test('screenshots', async ({ page, browser }) => {
     await p.goto('/jobs');
     await p.waitForTimeout(300);
     await shoot(p, `${dir}/jobs-${scheme}.png`);
+    const csrf = { 'x-csrf-token': (await (await p.request.get('/api/admin/auth/me')).json()).csrfToken };
+    await p.request.post('/api/admin/tokens', { headers: csrf, data: { name: `CI (${scheme})`, scopes: ['tickets:read'], expiresInDays: 30 } });
+    await p.goto('/tokens');
+    await p.waitForTimeout(300);
+    await shoot(p, `${dir}/tokens-${scheme}.png`);
+    const device = (await (await p.request.post('/api/admin/auth/device', { data: { clientName: 'snitch CLI on build-01' } })).json()) as { userCode: string };
+    await p.goto(`/device?code=${device.userCode}`);
+    await p.waitForTimeout(300);
+    await shoot(p, `${dir}/device-${scheme}.png`);
     await ctx.close();
   }
   void page;

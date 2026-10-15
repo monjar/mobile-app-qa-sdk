@@ -5,7 +5,9 @@ name: release
 #   - publishes react-native-snitch to npm through npm trusted publishing (OIDC: configure
 #     monjar/mobile-app-qa-sdk + release.yml as the package's trusted publisher on npmjs.com).
 #     An NPM_TOKEN repository secret still works as a fallback.
-#   - creates a GitHub Release with the npm tarball attached
+#   - publishes snitch-cli (the snitch command and MCP server) the same way; give it
+#     the same trusted publisher on npmjs.com
+#   - creates a GitHub Release with the npm tarballs attached
 # The Docker image is published by docker.yml on the same tag; SwiftPM and
 # JitPack resolve straight from the tag.
 on:
@@ -58,13 +60,35 @@ jobs:
         if: github.ref_type != 'tag' && inputs.dry_run != false
         working-directory: react-native
         run: npm publish --access public --dry-run
+      - name: Build and test snitch-cli
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+          npm ci
+          npm test -w cli
+          npm run build -w cli
+          node cli/dist/snitch.js --version
+          npm pack -w cli
+      - name: Publish snitch-cli to npm
+        if: github.ref_type == 'tag' || inputs.dry_run == false
+        working-directory: cli
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance
+      - name: Dry run (snitch-cli)
+        if: github.ref_type != 'tag' && inputs.dry_run != false
+        working-directory: cli
+        run: npm publish --access public --dry-run
       - uses: actions/upload-artifact@v6
         with:
           name: react-native-snitch
-          path: react-native/react-native-snitch-*.tgz
+          path: |
+            react-native/react-native-snitch-*.tgz
+            snitch-cli-*.tgz
       - name: GitHub Release
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v3
         with:
-          files: react-native/react-native-snitch-*.tgz
+          files: |
+            react-native/react-native-snitch-*.tgz
+            snitch-cli-*.tgz
           generate_release_notes: true

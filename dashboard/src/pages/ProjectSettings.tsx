@@ -834,7 +834,7 @@ function GithubWebhook({ integration: i, readOnly, onEdit }: { integration: Inte
           </li>
           <li>Secret: the secret generated here.</li>
           <li>
-            Which events: “Let me select individual events”, then tick <strong>Issues</strong> and <strong>Issue comments</strong>.
+            Which events: “Let me select individual events”, then tick <strong>Issues</strong>, <strong>Issue comments</strong> and <strong>Pull requests</strong> (so a pull request that says “Fixes #12” shows on the ticket).
           </li>
           <li>Add webhook. GitHub sends a ping, and its deliveries show up under Recent Deliveries.</li>
         </ol>

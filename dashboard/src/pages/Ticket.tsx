@@ -624,6 +624,12 @@ function describe(e: TicketEventView, typeLabel: (id: string) => string, userNam
     }
     case 'external_comment':
       return 'commented on GitHub';
+    case 'external_pull_request': {
+      const pr = `pull request #${String(d.number ?? '?')}${str(d.title) ? ` “${str(d.title)}”` : ''}`;
+      if (d.state === 'merged') return `Merged ${pr}, which fixes the issue`;
+      if (d.state === 'closed') return `Closed ${pr} without merging`;
+      return `Opened ${pr}, which says it fixes the issue`;
+    }
     case 'notification_sent':
       return `Emailed the ${str(d.to) || 'recipient'}${str(d.email) ? ` (${str(d.email)})` : ''}`;
     case 'media_upload_failed':
@@ -651,6 +657,7 @@ function describe(e: TicketEventView, typeLabel: (id: string) => string, userNam
 function actorName(e: TicketEventView): string {
   if (e.kind === 'external_comment') return str(e.data.author) ? `@${str(e.data.author)}` : 'GitHub';
   if (e.kind === 'external_status_changed') return 'GitHub';
+  if (e.kind === 'external_pull_request') return str(e.data.author) ? `@${str(e.data.author)}` : 'GitHub';
   if (e.actor.type === 'user') return e.actor.name ?? 'Someone';
   if (e.actor.type === 'sdk') return 'Device';
   if (e.actor.type === 'integration') return 'Integration';

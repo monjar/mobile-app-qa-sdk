@@ -283,4 +283,44 @@ export const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX account_tokens_by_user ON account_tokens(user_id, purpose);
   `,
+
+  // 4 — 0.5: personal API tokens and device sign-in (the snitch CLI)
+  `
+  -- Bearer tokens that act as their user, limited to scopes. Only the token's SHA-256 is stored.
+  CREATE TABLE api_tokens (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    token_prefix TEXT NOT NULL,
+    scopes_json TEXT NOT NULL,
+    via_device INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER,
+    last_used_at INTEGER,
+    last_used_ip TEXT,
+    revoked_at INTEGER
+  );
+  CREATE INDEX api_tokens_by_user ON api_tokens(user_id, created_at);
+
+  -- Pending device sign-ins. The token is minted when the CLI polls after approval,
+  -- so no plaintext token is ever stored here.
+  CREATE TABLE device_codes (
+    device_code_hash TEXT PRIMARY KEY,
+    user_code TEXT NOT NULL UNIQUE,
+    client_name TEXT NOT NULL,
+    scopes_json TEXT NOT NULL,
+    token_days INTEGER,
+    ip TEXT,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    interval_s INTEGER NOT NULL,
+    last_polled_at INTEGER,
+    approved_by TEXT REFERENCES users(id) ON DELETE CASCADE,
+    approved_at INTEGER,
+    denied_at INTEGER,
+    token_id TEXT
+  );
+  CREATE INDEX device_codes_by_expiry ON device_codes(expires_at);
+  `,
 ];

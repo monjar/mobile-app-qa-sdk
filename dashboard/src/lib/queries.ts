@@ -18,6 +18,7 @@ export const qk = {
   authProviders: ['auth-providers'] as const,
   jobs: (state: string) => ['jobs', state] as const,
   audit: ['audit'] as const,
+  tokens: (all: boolean) => ['tokens', all] as const,
 };
 
 export const useProjects = () => useQuery({ queryKey: qk.projects, queryFn: () => get<ProjectView[]>('/projects'), refetchInterval: 30_000 });

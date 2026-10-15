@@ -70,6 +70,13 @@ describe('before the report', () => {
     expect(mail.html).toContain('Screen   &lt;Home&gt;');
     expect(email(input(), '[Snitch]', null).html).not.toContain('Before the report');
   });
+
+  it('tells GitHub readers (and agents) how to fetch the whole report', () => {
+    const { body } = githubIssue(input());
+    expect(body).toContain('<code>npx snitch-cli ticket MOCH-1 --download</code>');
+    // The marker stays last, where findExisting and older readers expect it.
+    expect(body.trimEnd().split('\n').at(-1)).toMatch(/^<!-- snitch:ticket=/);
+  });
 });
 
 /** Sends a report whose only attachment is the timeline fixture. */
