@@ -248,6 +248,126 @@ export const DeviceListQuery = z.object({
 });
 export type DeviceListQuery = z.infer<typeof DeviceListQuery>;
 
+// ── API tokens & device sign-in ─────────────────────────────────────────────
+
+/**
+ * Personal API tokens for scripts, the `snitch` CLI and its MCP server. A token
+ * acts as the user who made it, limited to its scopes, and is sent as
+ * `Authorization: Bearer snitch_at_…` instead of the session cookie (no CSRF
+ * header: that guards cookies, which a bearer request doesn't carry).
+ *
+ * - tickets:read   list and read tickets, download attachments, list projects
+ * - tickets:write  comment on tickets and change status, assignee, type, title
+ *
+ * Tokens can't manage tokens, users, projects or integrations, and can't
+ * approve a device sign-in: those stay with a signed-in browser.
+ */
+export const API_TOKEN_PREFIX = 'snitch_at_';
+export const API_TOKEN = /^snitch_at_[0-9A-HJKMNP-TV-Z]{32}$/;
+export const API_TOKEN_SCOPES = ['tickets:read', 'tickets:write'] as const;
+export const ApiTokenScope = z.enum(API_TOKEN_SCOPES);
+export type ApiTokenScope = z.infer<typeof ApiTokenScope>;
+const Scopes = z
+  .array(ApiTokenScope)
+  .min(1)
+  .max(API_TOKEN_SCOPES.length)
+  .transform((s) => [...new Set(s)]);
+
+export interface ApiTokenView {
+  id: string;
+  name: string;
+  /** The first characters, to tell tokens apart (`snitch_at_7K3Q…`). */
+  prefix: string;
+  scopes: ApiTokenScope[];
+  /** Made by a device sign-in (`snitch login`) rather than on the tokens page. */
+  viaDevice: boolean;
+  createdAt: number;
+  expiresAt: number | null;
+  lastUsedAt: number | null;
+  lastUsedIp: string | null;
+  revokedAt: number | null;
+  /** Set when an admin lists everyone's tokens. */
+  user?: PersonRef;
+}
+
+/** POST /tokens. `expiresInDays: null` never expires; omitted means 90 days. */
+export const ApiTokenCreate = z.object({
+  name: z.string().trim().min(1).max(80),
+  scopes: Scopes,
+  expiresInDays: z.number().int().min(1).max(366).nullable().optional(),
+});
+export type ApiTokenCreate = z.infer<typeof ApiTokenCreate>;
+
+/** The token itself is in this response only. */
+export interface ApiTokenCreated {
+  token: string;
+  view: ApiTokenView;
+}
+
+/** GET /token — who a bearer token (or a session) is. */
+export interface WhoAmI {
+  user: UserView;
+  /** Null for a browser session. */
+  token: Pick<ApiTokenView, 'id' | 'name' | 'scopes' | 'expiresAt'> | null;
+  server: { version: string; publicUrl: string };
+}
+
+/**
+ * Device sign-in (RFC 8628's flow, JSON instead of form posts):
+ *   1. the CLI POSTs /auth/device and shows `userCode` and `verificationUrl`;
+ *   2. the user opens it, signs in to the dashboard and approves the code;
+ *   3. the CLI polls /auth/device/token every `interval` seconds and, once
+ *      approved, gets a new API token (exactly once).
+ * Nothing secret travels through the browser: the token goes to whoever holds
+ * `deviceCode`, which never left the CLI.
+ */
+export const DeviceCodeRequest = z.object({
+  /** Shown on the approval page, e.g. "snitch CLI on amir-mbp". */
+  clientName: z.string().trim().min(1).max(80),
+  scopes: Scopes.default(['tickets:read', 'tickets:write']),
+  /** Lifetime of the token it ends in; null never expires, omitted means 90 days. */
+  expiresInDays: z.number().int().min(1).max(366).nullable().optional(),
+});
+export type DeviceCodeRequest = z.infer<typeof DeviceCodeRequest>;
+
+export interface DeviceCodeIssued {
+  deviceCode: string;
+  /** Eight letters as XXXX-XXXX; no vowels, so it never spells a word. */
+  userCode: string;
+  verificationUrl: string;
+  /** verificationUrl with the code filled in. */
+  verificationUrlComplete: string;
+  expiresIn: number;
+  /** Seconds between polls. */
+  interval: number;
+}
+
+export const DeviceTokenRequest = z.object({ deviceCode: z.string().min(1).max(200) });
+export type DeviceTokenRequest = z.infer<typeof DeviceTokenRequest>;
+
+/** POST /auth/device/token. `slow_down` means add 5 s to the interval. */
+export type DeviceTokenResult =
+  | { status: 'pending' | 'slow_down' | 'denied' | 'expired' }
+  | { status: 'approved'; token: string; view: ApiTokenView; user: UserView };
+
+export const USER_CODE = /^[BCDFGHJKLMNPQRSTVWXZ]{4}-?[BCDFGHJKLMNPQRSTVWXZ]{4}$/i;
+
+/** GET /device/:userCode — what the approval page shows. */
+export interface DeviceCodeInfo {
+  userCode: string;
+  clientName: string;
+  scopes: ApiTokenScope[];
+  /** Lifetime of the token approval creates, in days; null never expires. */
+  tokenDays: number | null;
+  createdAt: number;
+  expiresAt: number;
+  /** Where the request came from, so a code someone else sent you stands out. */
+  ip: string | null;
+  /** The request came from the address the approver is browsing from (same machine or network). */
+  fromYourAddress: boolean;
+  state: 'pending' | 'approved' | 'denied';
+}
+
 // ── Tickets ─────────────────────────────────────────────────────────────────
 
 export interface PersonRef {
@@ -360,6 +480,11 @@ export const TICKET_EVENT_KINDS = [
   'duplicate_marked',
   /** Media couldn't be committed to GitHub, so the issue links to Snitch instead; data: { integrationId, integration, error }. */
   'media_upload_failed',
+  /**
+   * A pull request that says it fixes the linked GitHub issue was opened, merged or closed unmerged;
+   * data: { integrationId, number, title, url, state: 'opened' | 'merged' | 'closed', author? }.
+   */
+  'external_pull_request',
 ] as const;
 export type TicketEventKind = (typeof TICKET_EVENT_KINDS)[number];
 

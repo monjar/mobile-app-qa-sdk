@@ -18,6 +18,7 @@ import { IntegrationsRepo } from './repo/integrations';
 import { JobsRepo } from './repo/jobs';
 import { InstallsRepo } from './repo/installs';
 import { SettingsRepo } from './repo/settings';
+import { ApiTokensRepo, DeviceCodesRepo } from './repo/apiTokens';
 import { RateLimiter } from './http/rateLimit';
 import { DAY_MS, HOUR_MS, MINUTE_MS, systemClock } from './util/clock';
 
@@ -42,6 +43,8 @@ export function buildDeps(config: ServerConfig, overrides: Partial<Deps> = {}): 
     sessions: new SessionsRepo(db, now, config.sessionDays * DAY_MS),
     accountTokens: new AccountTokensRepo(db, now),
     audit: new AuditRepo(db, now),
+    apiTokens: new ApiTokensRepo(db, now),
+    deviceCodes: new DeviceCodesRepo(db, now),
     tickets: new TicketsRepo(db, now, projects),
     integrations: new IntegrationsRepo(db, now, box, config.publicUrl),
     jobs: new JobsRepo(db, now),
@@ -56,6 +59,9 @@ export function buildDeps(config: ServerConfig, overrides: Partial<Deps> = {}): 
       // GitHub sends a burst when someone bulk-closes issues; this only stops floods.
       hooksPerIp: new RateLimiter(300, MINUTE_MS, now),
       resetEmailsPerAddress: new RateLimiter(3, HOUR_MS, now),
+      apiPerToken: new RateLimiter(600, MINUTE_MS, now),
+      deviceCodesPerIp: new RateLimiter(20, 15 * MINUTE_MS, now),
+      devicePollsPerIp: new RateLimiter(120, MINUTE_MS, now),
     },
     wake: () => undefined,
     setupToken: { value: null },

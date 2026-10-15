@@ -3,7 +3,7 @@ import { createHmac, randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { IntegrationView, TicketDetail, WebhookSecretCreated } from '@snitch/contract';
 import { drain } from '../src/worker/worker';
-import { syncComment } from '../src/integrations/githubSync';
+import { closingRefs, syncComment } from '../src/integrations/githubSync';
 import { RateLimiter } from '../src/http/rateLimit';
 import { adminFetch, FakeGithub, harness, jpeg, login, mp4, sendReport, type Harness, type Session } from './helpers';
 
@@ -250,6 +250,13 @@ const commentEvent = (number: number, id: number, body: string) => ({
   comment: { id, body, html_url: `https://github.com/monjar/mochiro/issues/${number}#issuecomment-${id}`, user: { login: 'octocat' } },
 });
 
+const prEvent = (action: string, number: number, body: string, opts: { merged?: boolean; repo?: string; title?: string } = {}) => ({
+  action,
+  number,
+  pull_request: { number, html_url: `https://github.com/monjar/mochiro/pull/${number}`, title: opts.title ?? 'Close the keyboard on tap', body, merged: opts.merged ?? false, user: { login: 'octocat' } },
+  repository: { name: opts.repo ?? 'mochiro', owner: { login: 'monjar' } },
+});
+
 interface Synced {
   h: Harness;
   s: Session;
@@ -394,6 +401,60 @@ describe('github webhooks', () => {
       data: { integrationId, body: 'Fixed on main, please retest', author: 'octocat', url: 'https://github.com/monjar/mochiro/issues/1#issuecomment-501', externalId: '501' },
     });
     expect(h.deps.jobs.list(null).map((j) => j.kind)).not.toContain('github_comment');
+  });
+});
+
+describe('pull requests', () => {
+  it('reads GitHub closing keywords for this repository only', () => {
+    expect(closingRefs('Fixes #1', 'acme', 'shop')).toEqual([1]);
+    expect(closingRefs('closes: #2 and resolved #3, fixes #2', 'acme', 'shop')).toEqual([2, 3]);
+    expect(closingRefs('Fixed ACME/Shop#4; fixes other/repo#5', 'acme', 'shop')).toEqual([4]);
+    expect(closingRefs('resolves https://github.com/acme/shop/issues/6', 'acme', 'shop')).toEqual([6]);
+    expect(closingRefs('Related to #7, see #8, prefixes #9', 'acme', 'shop')).toEqual([]);
+    // Not in a PR template's comments, not in code, not across lines.
+    expect(closingRefs('<!-- Example: Fixes #123 -->\nReal: fixes #5', 'acme', 'shop')).toEqual([5]);
+    expect(closingRefs('```\ngit commit -m "fix #7"\n```\nand `closes #8`', 'acme', 'shop')).toEqual([]);
+    expect(closingRefs('Fixes:\n\n#12', 'acme', 'shop')).toEqual([]);
+  });
+
+  it('records a pull request that fixes the issue when opened and merged, once each', async () => {
+    const { h, s, gh, ticketId, integrationId, deliver } = await synced({ syncStatus: false, syncComments: false });
+    const writes = gh.writes().length;
+    const opened = await deliver('pull_request', prEvent('opened', 7, 'Fixes #1\n\nTapping outside now dismisses the keyboard.'));
+    expect(await opened.json()).toEqual({ handled: true, detail: 'pull request #7 opened, recorded on #1' });
+    expect(await (await deliver('pull_request', prEvent('edited', 7, 'Fixes #1, tidied'))).json()).toMatchObject({ handled: false });
+    expect(await (await deliver('pull_request', prEvent('synchronize', 7, 'Fixes #1'))).json()).toMatchObject({ handled: false, detail: 'action synchronize is not used' });
+    expect(await (await deliver('pull_request', prEvent('closed', 7, 'Fixes #1', { merged: true }))).json()).toMatchObject({ handled: true, detail: 'pull request #7 merged, recorded on #1' });
+
+    const d = (await (await adminFetch(h, s, `/tickets/${ticketId}`)).json()) as TicketDetail;
+    const prs = d.events.filter((e) => e.kind === 'external_pull_request');
+    expect(prs.map((e) => e.data.state)).toEqual(['opened', 'merged']);
+    expect(prs[0]).toMatchObject({
+      actor: { type: 'integration' },
+      data: { integrationId, number: 7, title: 'Close the keyboard on tap', url: 'https://github.com/monjar/mochiro/pull/7', author: 'octocat' },
+    });
+    // Recording a pull request changes nothing else: GitHub closing the issue is what resolves the ticket.
+    expect(status(h, ticketId)).toBe('new');
+    await drain(h.deps);
+    expect(gh.writes()).toHaveLength(writes);
+  });
+
+  it('records an edit by what the pull request is now, and ignores fixes in the title', async () => {
+    const { h, s, ticketId, deliver } = await synced();
+    const merged = { ...prEvent('edited', 11, 'Fixes #1'), pull_request: { ...prEvent('edited', 11, 'Fixes #1').pull_request, state: 'closed', merged: true } };
+    expect(await (await deliver('pull_request', merged)).json()).toMatchObject({ handled: true, detail: 'pull request #11 merged, recorded on #1' });
+    const revert = prEvent('opened', 12, 'Reverts acme/shop#11', { title: 'Revert "Close the keyboard on tap (fixes #1)"' });
+    expect(await (await deliver('pull_request', revert)).json()).toMatchObject({ handled: false });
+    const d = (await (await adminFetch(h, s, `/tickets/${ticketId}`)).json()) as TicketDetail;
+    expect(d.events.filter((e) => e.kind === 'external_pull_request').map((e) => [e.data.number, e.data.state])).toEqual([[11, 'merged']]);
+  });
+
+  it('ignores pull requests that don’t fix a linked issue, and other repositories', async () => {
+    const { deliver } = await synced();
+    expect(await (await deliver('pull_request', prEvent('opened', 8, 'Refactor, see #1'))).json()).toEqual({ handled: false, detail: "pull request #8 doesn't say it fixes an issue" });
+    expect(await (await deliver('pull_request', prEvent('opened', 9, 'Fixes #42'))).json()).toEqual({ handled: false, detail: 'no new linked tickets for pull request #9' });
+    expect(await (await deliver('pull_request', prEvent('opened', 10, 'Fixes #1', { repo: 'other' }))).json()).toMatchObject({ handled: false, detail: expect.stringContaining('is not monjar/mochiro') });
+    expect(await (await deliver('pull_request', { action: 'opened' })).json()).toEqual({ handled: false, detail: 'payload has no pull request' });
   });
 });
 

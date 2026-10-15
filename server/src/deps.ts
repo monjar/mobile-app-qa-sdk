@@ -16,6 +16,7 @@ import type { JobsRepo } from './repo/jobs';
 import type { InstallsRepo } from './repo/installs';
 import type { SettingsRepo } from './repo/settings';
 import type { RateLimiter } from './http/rateLimit';
+import type { ApiTokensRepo, DeviceCodesRepo } from './repo/apiTokens';
 
 export interface Limiters {
   reportsPerKey: RateLimiter;
@@ -27,6 +28,11 @@ export interface Limiters {
   hooksPerIp: RateLimiter;
   /** "Forgot password?" emails per address, so nobody can mail-bomb a colleague. */
   resetEmailsPerAddress: RateLimiter;
+  /** Requests per API token. */
+  apiPerToken: RateLimiter;
+  /** Device sign-ins started, and polls, per client IP. */
+  deviceCodesPerIp: RateLimiter;
+  devicePollsPerIp: RateLimiter;
 }
 
 export interface Deps {
@@ -48,6 +54,9 @@ export interface Deps {
   /** Invite and password-reset links. */
   accountTokens: AccountTokensRepo;
   audit: AuditRepo;
+  /** Personal API tokens, and the device sign-in that hands them to the CLI. */
+  apiTokens: ApiTokensRepo;
+  deviceCodes: DeviceCodesRepo;
   tickets: TicketsRepo;
   integrations: IntegrationsRepo;
   jobs: JobsRepo;

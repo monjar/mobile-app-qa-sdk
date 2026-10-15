@@ -8,7 +8,9 @@
  *
  * Inbound (the signed webhook, routes/hooks.ts): the issue being closed or
  * reopened moves the ticket, a new issue comment becomes an `external_comment`
- * event. Inbound changes never queue outbound jobs, and comments Snitch posts
+ * event, and a pull request that says it fixes the issue ("Fixes #12") is
+ * recorded on the ticket when it's opened, merged or closed. Merging doesn't
+ * move the ticket by itself: GitHub closes the issue, and that event does. Inbound changes never queue outbound jobs, and comments Snitch posts
  * carry a marker so they are not imported back: no loops.
  */
 import { GithubConfig, type TicketStatus } from '@snitch/contract';
@@ -119,6 +121,78 @@ const IssueEvent = z.object({
     .nullish(),
 });
 
+/** The fields of GitHub's `pull_request` payload Snitch reads. */
+const PullRequestEvent = z.object({
+  action: z.string(),
+  pull_request: z.object({
+    number: z.number().int(),
+    html_url: z.string(),
+    title: z.string(),
+    body: z.string().nullish(),
+    state: z.string().nullish(),
+    merged: z.boolean().nullish(),
+    user: z.object({ login: z.string() }).nullish(),
+  }),
+  repository: z.object({ name: z.string(), owner: z.object({ login: z.string() }) }),
+});
+
+/**
+ * Issue numbers in `owner/repo` that a pull request body says it closes, using GitHub's closing keywords:
+ * "Fixes #12", "closes: owner/repo#12", "resolved https://github.com/owner/repo/issues/12". Like GitHub,
+ * it reads the body only (not the title, so a revert titled `Revert "… (fixes #12)"` doesn't count), skips
+ * HTML comments (PR templates) and code, and wants the keyword and the reference on the same line.
+ */
+export function closingRefs(body: string, owner: string, repo: string): number[] {
+  const same = (o?: string, r?: string) => !o || (o.toLowerCase() === owner.toLowerCase() && r!.toLowerCase() === repo.toLowerCase());
+  const text = body
+    .replace(/<!--[\s\S]*?(?:-->|$)/g, ' ')
+    .replace(/(`{3,}|~{3,})[\s\S]*?(?:\1|$)/g, ' ')
+    .replace(/`[^`\n]*`/g, ' ');
+  const found = new Set<number>();
+  const re = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b:?[ \t]+(?:([\w.-]+)\/([\w.-]+))?#(\d+)\b|\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b:?[ \t]+https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/issues\/(\d+)\b/gi;
+  for (const m of text.matchAll(re)) {
+    if (m[3] && same(m[1], m[2])) found.add(Number(m[3]));
+    if (m[6] && same(m[4], m[5])) found.add(Number(m[6]));
+  }
+  return [...found];
+}
+
+function prState(action: string, pr: { state?: string | null; merged?: boolean | null }): 'opened' | 'merged' | 'closed' | null {
+  const current = () => (pr.merged === true ? 'merged' : pr.state === 'closed' ? 'closed' : 'opened');
+  // An edit can add "Fixes #12" to a pull request that's already merged: record what it is now.
+  if (action === 'edited') return current();
+  if (action === 'opened' || action === 'reopened' || action === 'ready_for_review') return 'opened';
+  if (action === 'closed') return pr.merged === true ? 'merged' : 'closed';
+  return null;
+}
+
+/** Records a pull request on every linked ticket whose issue it says it fixes. */
+function handlePullRequest(deps: Deps, integration: IntegrationRow, cfg: GithubConfig, raw: unknown): HookResult {
+  const parsed = PullRequestEvent.safeParse(raw);
+  if (!parsed.success) return ignored('payload has no pull request');
+  const { action, pull_request: pr, repository } = parsed.data;
+  if (repository.owner.login.toLowerCase() !== cfg.owner.toLowerCase() || repository.name.toLowerCase() !== cfg.repo.toLowerCase()) {
+    return ignored(`repository ${repository.owner.login}/${repository.name} is not ${cfg.owner}/${cfg.repo}`);
+  }
+  const state = prState(action, pr);
+  if (!state) return ignored(`action ${action} is not used`);
+  const issues = closingRefs(pr.body ?? '', cfg.owner, cfg.repo);
+  if (!issues.length) return ignored(`pull request #${pr.number} doesn't say it fixes an issue`);
+  const recorded: string[] = [];
+  for (const n of issues) {
+    const esc = deps.integrations.escalationByExternalId(integration.id, String(n));
+    const ticket = esc ? deps.tickets.get(esc.ticket_id) : null;
+    if (!ticket) continue;
+    const data = { integrationId: integration.id, number: pr.number, title: pr.title.slice(0, 200), url: pr.html_url, state, ...(pr.user ? { author: pr.user.login } : {}) };
+    // One event per pull request and state: redeliveries and repeated edits change nothing.
+    if (deps.tickets.addExternalEvent(ticket.id, { type: 'integration' }, 'external_pull_request', data, `pr:${pr.number}:${state}`) !== null) {
+      deps.tickets.touch(ticket.id);
+      recorded.push(`#${n}`);
+    }
+  }
+  return recorded.length ? { handled: true, detail: `pull request #${pr.number} ${state}, recorded on ${recorded.join(', ')}` } : ignored(`no new linked tickets for pull request #${pr.number}`);
+}
+
 export interface HookResult {
   handled: boolean;
   detail: string;
@@ -128,6 +202,7 @@ const ignored = (detail: string): HookResult => ({ handled: false, detail });
 
 /** Applies one verified GitHub event to the ticket its issue belongs to. */
 export function handleGithubEvent(deps: Deps, integration: IntegrationRow, event: string, raw: unknown): HookResult {
+  if (event === 'pull_request') return handlePullRequest(deps, integration, GithubConfig.parse(JSON.parse(integration.config_json)), raw);
   if (event !== 'issues' && event !== 'issue_comment') return ignored(`event ${event} is not used`);
   const parsed = IssueEvent.safeParse(raw);
   if (!parsed.success) return ignored('payload has no issue');

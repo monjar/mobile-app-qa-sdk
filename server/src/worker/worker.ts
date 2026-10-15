@@ -218,6 +218,7 @@ const handlers: Record<string, Handler> = {
   async [JOB.housekeeping](deps) {
     deps.sessions.purgeExpired();
     deps.accountTokens.purgeExpired();
+    deps.deviceCodes.purgeExpired();
     deps.jobs.prune(30 * DAY_MS);
   },
 };

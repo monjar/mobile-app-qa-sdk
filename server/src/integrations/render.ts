@@ -59,6 +59,9 @@ function codeBlock(lines: string[]): string {
 
 export const GITHUB_MARKER = (ticketId: string) => `<!-- snitch:ticket=${ticketId} -->`;
 
+/** The snitch CLI command that downloads a ticket (docs/cli.md). */
+export const cliHint = (key: string) => `npx snitch-cli ticket ${key} --download`;
+
 export function githubIssue(i: RenderInput): { title: string; body: string } {
   const title = `[${i.typeLabel}] ${i.key}: ${i.ticket.title}`.slice(0, 250);
   const quote = i.ticket.description.trim()
@@ -84,6 +87,8 @@ export function githubIssue(i: RenderInput): { title: string; body: string } {
     '',
     ...(i.beforeReport ? ['**Before the report**', '', codeBlock(beforeReportLines(i.beforeReport)), ''] : []),
     `[Open ${i.key} in Snitch](${i.dashboardUrl})`,
+    '',
+    `<sub>Everything in this report (screenshot, video frames, timeline, logs), for you or an agent: <code>${cliHint(i.key)}</code></sub>`,
     '',
     GITHUB_MARKER(i.ticket.id),
   ].join('\n');

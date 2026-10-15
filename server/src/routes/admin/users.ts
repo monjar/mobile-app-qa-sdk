@@ -78,7 +78,16 @@ export function userRoutes(deps: Deps): Hono<AppEnv> {
     if (demoting && deps.users.activeAdminCount() <= 1 && target.disabled_at === null) throw invalid('At least one active admin must remain');
     const view = await deps.users.update(target.id, patch);
     if (patch.disabled || patch.password) deps.sessions.deleteForUser(target.id);
-    deps.audit.add(c.get('user').id, 'user.updated', target.id, { fields: Object.keys(patch).filter((k) => k !== 'password'), passwordReset: !!patch.password }, c.get('ip'));
+    // Disabling someone or setting their password also ends their API tokens: enabling them later doesn't
+    // bring old tokens back, and a password reset signs out every client, not just browsers.
+    const tokensRevoked = patch.disabled || patch.password ? deps.apiTokens.revokeForUser(target.id) : 0;
+    deps.audit.add(
+      c.get('user').id,
+      'user.updated',
+      target.id,
+      { fields: Object.keys(patch).filter((k) => k !== 'password'), passwordReset: !!patch.password, ...(tokensRevoked ? { tokensRevoked } : {}) },
+      c.get('ip'),
+    );
     return c.json(view);
   });
 

@@ -1,7 +1,7 @@
 /**
  * Public, signed webhooks from the outside world (/api/hooks/*).
  *
- *   POST /api/hooks/github/:integrationId   issue events for two-way sync
+ *   POST /api/hooks/github/:integrationId   issue, comment and pull request events for two-way sync
  *
  * GitHub signs the raw body with the integration's webhook secret
  * (X-Hub-Signature-256: sha256=HMAC_SHA256(secret, body)). Anything without a
