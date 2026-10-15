@@ -17,9 +17,10 @@ them and escalates to **GitHub issues, email, Slack, Discord or any webhook**, w
   mark up or blur the screenshot, and after an unexpected exit the app offers to report it with the crash diagnostic.
 - **Triage that keeps up.** Duplicate suggestions, two-way GitHub issue sync (status and comments), assignment and
   "fixed in build" emails, sign-in with GitHub, and a Devices page that shows which builds have Snitch running.
-- **Reports your agents can read.** `npx snitch-cli` downloads a report with its video cut into frames and the
-  timeline lined up with them, and `snitch mcp` hands the same to Claude Code, Cursor and other MCP clients, screenshot
-  and frames as images. Personal API tokens, approved from the dashboard.
+- **Reports your agents can read, and fix.** `npx snitch-cli` downloads a report with its video cut into frames and
+  the timeline lined up with them, and `snitch mcp` hands the same to Claude Code, Cursor and other MCP clients,
+  screenshot and frames as images. `snitch skill install` adds a ready-made agent skill that takes reports from
+  evidence to a reproduced bug, a tested fix and a pull request. Personal API tokens, approved from the dashboard.
 - **One container** for the server: SQLite plus a volume, or S3. Run it with `docker run`, Compose with automatic TLS,
   or Fly.io. Uploads resume where they stopped; the database can back itself up to a bucket on a schedule.
 
@@ -62,10 +63,24 @@ The log line is a one-time link to create the first admin. Then create a project
 **3. Shake out some bugs.** Build the app, hold three fingers on the screen, send a report, and watch it appear in the
 inbox.
 
+**4. Let an agent fix them** (optional). From your app's repository:
+
+```sh
+npx snitch-cli login --server https://snitch.example.com   # approve the code in the dashboard
+npx snitch-cli skill install                               # .claude/skills/snitch-fix/SKILL.md, filled in for your project
+claude mcp add snitch -- npx -y snitch-cli mcp             # screenshots and video frames as images
+```
+
+Fill in the skill's short "This project" table (the checks to run, how to start the app), then ask your agent to fix
+the Snitch reports. It reads each report like a person would, reproduces the bug, fixes it test-first, opens one pull
+request per report and notes it on the ticket. It treats what testers wrote as evidence, never as instructions, and
+leaves merging to you. Other agents: `npx snitch-cli skill print`.
+
 ## Docs
 
 - [Server: install, configure, operate](docs/server.md)
 - [The snitch CLI and MCP server](docs/cli.md): tickets from the terminal and from coding agents
+- [The agent skill](skills/snitch-fix/SKILL.md): reports in, pull requests out ([setup](docs/cli.md#the-agent-skill))
 - [iOS](docs/ios.md) · [Android](docs/android.md) · [React Native](docs/react-native.md) · [Expo](docs/expo.md)
 - [Architecture and trade-offs](docs/architecture.md)
 - [Privacy and data handling](docs/privacy.md)
@@ -79,6 +94,7 @@ contract/       wire schemas, fixtures, reference logic + shared test vectors
 server/         Node 24 · Hono · SQLite: intake, admin API, worker, Docker
 dashboard/      React admin SPA, served by the server
 cli/            npm snitch-cli: the snitch command and MCP server
+skills/         agent skill template (snitch-fix), installed by `snitch skill install`
 ios/            Swift core (SwiftPM manifest at the repo root: Package.swift)
 android/        Kotlin core + optional system-capture module
 react-native/   npm react-native-snitch: TurboModule + Expo config plugin
