@@ -36,8 +36,14 @@ class ThreeFingerHoldTest {
 
     @After
     fun finish() {
-        instrumentation.uiAutomation.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
-        SystemClock.sleep(300)
+        // The sheet opens with its text field focused, so the first BACK may only close the
+        // keyboard: press it until the sheet is gone, so the next test starts on a bare screen.
+        var backs = 0
+        while (backs < 3 && waitForText("Send", timeoutMs = 300)) {
+            instrumentation.uiAutomation.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
+            backs++
+            SystemClock.sleep(300)
+        }
         instrumentation.runOnMainSync { activity.finish() }
         instrumentation.waitForIdleSync()
     }
@@ -72,13 +78,19 @@ class ThreeFingerHoldTest {
     @Test
     fun aSingleLongPressStillWorks() {
         SystemClock.sleep(1100) // past the detector's cooldown from any earlier test
-        // A full second past the row's timer: on a busy emulator (an earlier test's report may
-        // still be uploading) the main thread can run that timer a few hundred ms late.
-        Touches.hold(listOf(Touches.centerOf(activity.rows[3])), holdMs = PressRow.LONG_PRESS_MS + 1_000)
+        val row = activity.rows[3]
+        // The finger stays down until the row's 600 ms timer has run, for 5 s at most: on a busy
+        // emulator the main thread can run that timer more than a second late, and a fixed-length
+        // hold would lift the finger first, which cancels the timer.
+        val heldMs = Touches.holdUntil(listOf(Touches.centerOf(row)), maxMs = 5_000) { activity.longPresses >= 1 }
         instrumentation.waitForIdleSync()
         var longPresses = 0
-        Touches.onMain(activity) { longPresses = it.longPresses }
-        assertEquals(1, longPresses)
+        var history = ""
+        Touches.onMain(activity) {
+            longPresses = it.longPresses
+            history = row.history.joinToString()
+        }
+        assertEquals("one long-press after holding row 4 for $heldMs ms (its touches: $history)", 1, longPresses)
         assertTrue("the sheet must not open for one finger", !waitForText("Send", timeoutMs = 1_000))
     }
 

@@ -41,7 +41,7 @@ class MainActivity : Activity() {
     var cancels = 0
         private set
 
-    lateinit var rows: List<View>
+    lateinit var rows: List<PressRow>
         private set
 
     private lateinit var longPressLabel: TextView
@@ -148,7 +148,14 @@ class PressRow(
     private val onLongPress: () -> Unit,
     private val onCancel: () -> Unit,
 ) : TextView(context) {
+    /**
+     * The row's last few touch events and long-presses with their uptime, e.g. "down@5120",
+     * "long@5733", "up@6720"; main thread. Test failure messages print it.
+     */
+    val history = ArrayList<String>()
+
     private val longPress = Runnable {
+        note("long")
         isPressed = false
         onLongPress()
     }
@@ -165,16 +172,19 @@ class PressRow(
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                note("down")
                 isPressed = true
                 setBackgroundColor(0x220000FF)
                 postDelayed(longPress, LONG_PRESS_MS)
             }
             MotionEvent.ACTION_UP -> {
+                note("up")
                 removeCallbacks(longPress)
                 release()
                 performClick()
             }
             MotionEvent.ACTION_CANCEL -> {
+                note("cancel")
                 removeCallbacks(longPress)
                 release()
                 onCancel()
@@ -190,8 +200,14 @@ class PressRow(
         setBackgroundColor(Color.TRANSPARENT)
     }
 
+    private fun note(what: String) {
+        if (history.size == HISTORY_SIZE) history.removeAt(0)
+        history.add("$what@${SystemClock.uptimeMillis()}")
+    }
+
     companion object {
         const val LONG_PRESS_MS = 600L
+        private const val HISTORY_SIZE = 12
     }
 }
 
