@@ -155,6 +155,30 @@ final class NetworkCaptureTests: XCTestCase {
         XCTAssertEqual(networkEvents.map { $0.status }, [302, 200])
     }
 
+    func testARequestStillRunningAtFreezeIsInFlightUntilItEnds() throws {
+        StubURLProtocol.setHandler { _ in StubURLProtocol.Response(status: -1) }
+        let task = outer.dataTask(with: try request("https://api.example.com/v1/slow?id=7", method: "POST"))
+        task.resume()
+        let reached = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !StubURLProtocol.requests.isEmpty }, object: nil)
+        wait(for: [reached], timeout: 15)
+
+        let running = try XCTUnwrap(networkEvents.first)
+        XCTAssertEqual(networkEvents.count, 1)
+        XCTAssertEqual(running.method, "POST")
+        XCTAssertEqual(running.url, "https://api.example.com/v1/slow?id=*")
+        XCTAssertNil(running.status)
+        XCTAssertEqual(running.error, TimelineNet.inFlightError)
+        XCTAssertGreaterThanOrEqual(running.ms ?? -1, 0)
+
+        task.cancel()
+        let ended = XCTNSPredicateExpectation(
+            predicate: NSPredicate { [unowned self] _, _ in self.networkEvents.first?.error == "cancelled" },
+            object: nil
+        )
+        wait(for: [ended], timeout: 15)
+        XCTAssertEqual(networkEvents.count, 1, "recorded once, no longer in flight")
+    }
+
     func testNothingIsRecordedWhileNetworkCaptureIsOff() throws {
         StubURLProtocol.setHandler { _ in StubURLProtocol.Response(status: 204) }
         TimelineRecorder.shared.configure(TimelineRecorder.Switches(on: true, console: true, network: false, screens: true))

@@ -99,6 +99,47 @@ class TimelineRecorderTest {
     }
 
     @Test
+    fun `requests still running at freeze are in flight`() {
+        recorder.configure(active = true, console = true, network = true, screens = true)
+        val slow = recorder.requestStarted(now, "get", "https://a.example/slow?id=7")
+        val quick = recorder.requestStarted(now + 10, "POST", "https://a.example/quick")
+        now += 40
+        recorder.net(now - 30, "POST", "https://a.example/quick", 201, 30.0, 2, 0, null, quick)
+        now += 2_460
+
+        val nets = recorder.freeze().events.filterIsInstance<TimelineEvent.Net>()
+        assertEquals(listOf("https://a.example/quick", "https://a.example/slow?id=*"), nets.map { it.url })
+        assertEquals(
+            TimelineEvent.Net(now - 2_500, "GET", "https://a.example/slow?id=*", null, 2_500.0, null, null, TimelineEvent.NET_IN_FLIGHT),
+            nets[1],
+        )
+
+        recorder.net(now - 2_500, "GET", "https://a.example/slow?id=7", 200, 2_500.0, null, 5, null, slow)
+        val after = recorder.freeze().events.filterIsInstance<TimelineEvent.Net>()
+        assertEquals(listOf(201, 200), after.map { it.status }, "both recorded, nothing left in flight")
+    }
+
+    @Test
+    fun `in-flight tracking follows the network switch and is bounded`() {
+        assertEquals(0L, recorder.requestStarted(now, "GET", "https://a.example/off"))
+        recorder.configure(active = true, console = true, network = true, screens = true)
+        recorder.requestStarted(now, "GET", "https://a.example/gone")
+        recorder.configure(active = true, console = true, network = false, screens = true)
+        recorder.configure(active = true, console = true, network = true, screens = true)
+        assertTrue(recorder.freeze().events.isEmpty(), "turning network capture off forgets running requests")
+
+        repeat(TimelineLimits.NETWORK + 5) { recorder.requestStarted(now, "GET", "https://a.example/$it") }
+        val urls = recorder.freeze().events.filterIsInstance<TimelineEvent.Net>().map { it.url }
+        assertEquals(TimelineLimits.NETWORK, urls.size)
+        assertEquals("https://a.example/5", urls.first(), "the oldest are forgotten first")
+        assertEquals(0, recorder.freeze().dropped, "not counted as dropped events")
+
+        val id = recorder.requestStarted(now, "GET", "https://a.example/ended")
+        recorder.requestEnded(id)
+        assertTrue(recorder.freeze().events.none { it is TimelineEvent.Net && it.url.endsWith("/ended") })
+    }
+
+    @Test
     fun `concurrent records are all kept`() {
         val r = TimelineRecorder()
         r.configure(active = true, console = true, network = true, screens = true)

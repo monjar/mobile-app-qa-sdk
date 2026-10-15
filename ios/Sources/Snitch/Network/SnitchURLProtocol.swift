@@ -22,6 +22,9 @@
 //   this instance and starts a new one for the new request, so each hop is recorded.
 // - The relayed response is `.notAllowed` for caching: the inner session already
 //   cached it (URLCache.shared) per the request's policy.
+// - Each request is registered with the timeline as it starts, so a report filed
+//   while it is still running shows it as in flight; recording it at the end
+//   replaces that.
 //
 // Installed by URLProtocol.registerClass on activation (covers URLSession.shared)
 // and, for sessions an app creates itself, by Snitch.captureNetwork(in:).
@@ -98,6 +101,8 @@ final class SnitchURLProtocol: URLProtocol {
     /// `stopLoading` ran: no client calls from here on.
     private var stopped = false
     private var recorded = false
+    /// TimelineRecorder's id for this request while it runs.
+    private var timelineID: Int?
     private var startedWall: Int64 = 0
     private var startedMono: CFTimeInterval = 0
     private var responseBytes = 0
@@ -120,10 +125,19 @@ final class SnitchURLProtocol: URLProtocol {
             forwarded.setValue(String(expected), forHTTPHeaderField: "Content-Length")
         }
 
+        let started = TimelineText.nowMs()
+        let id = request.url.flatMap { url in
+            TimelineRecorder.shared.requestStarted(
+                t: started,
+                method: request.httpMethod ?? "GET",
+                url: UrlSanitizer.sanitize(url.absoluteString)
+            )
+        }
         lock.lock()
         clientThread = Thread.current
         runLoopModes = modes
-        startedWall = TimelineText.nowMs()
+        timelineID = id
+        startedWall = started
         startedMono = CACurrentMediaTime()
         lock.unlock()
 
@@ -267,6 +281,7 @@ final class SnitchURLProtocol: URLProtocol {
         lock.lock()
         let first = !recorded
         recorded = true
+        let id = timelineID
         let wall = startedWall
         let mono = startedMono
         let received = responseBytes
@@ -285,7 +300,7 @@ final class SnitchURLProtocol: URLProtocol {
             reqBytes: sentBytes.map { Int(max(0, $0)) },
             resBytes: received,
             error: errorText
-        ))
+        ), requestID: id)
     }
 }
 

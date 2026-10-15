@@ -21,6 +21,7 @@ import {
   filterEvents,
   isError,
   isFailedRequest,
+  isInFlight,
   latestAtOrBefore,
   offset,
   toVideoTime,
@@ -319,17 +320,29 @@ function LogBody({ e }: { e: TimelineLog }) {
 
 function NetBody({ e }: { e: TimelineNet }) {
   const failed = isFailedRequest(e);
+  const inFlight = isInFlight(e);
   return (
     <>
       <div className="tl-msg">
         <span className="tl-method">{e.method}</span> <span className="tl-url">{e.url}</span>
       </div>
       <div className="tl-meta">
-        {e.status !== undefined ? <span className={`tl-status s${Math.floor(e.status / 100)}`}>{e.status}</span> : <span className="tl-status s5">No response</span>}
-        {e.ms !== undefined && <span>{e.ms < 1000 ? `${Math.round(e.ms)} ms` : `${(e.ms / 1000).toFixed(1)} s`}</span>}
+        {e.status !== undefined ? (
+          <span className={`tl-status s${Math.floor(e.status / 100)}`}>{e.status}</span>
+        ) : inFlight ? (
+          <span className="tl-status s4" title="Still running when the report was opened">In flight</span>
+        ) : (
+          <span className="tl-status s5">No response</span>
+        )}
+        {e.ms !== undefined && (
+          <span>
+            {e.ms < 1000 ? `${Math.round(e.ms)} ms` : `${(e.ms / 1000).toFixed(1)} s`}
+            {inFlight && ' so far'}
+          </span>
+        )}
         {e.reqBytes !== undefined && <span title="Request body">↑ {bytes(e.reqBytes)}</span>}
         {e.resBytes !== undefined && <span title="Response body">↓ {bytes(e.resBytes)}</span>}
-        {e.error && <span className={failed ? 'error-text' : undefined}>{e.error}</span>}
+        {e.error && !inFlight && <span className={failed ? 'error-text' : undefined}>{e.error}</span>}
       </div>
     </>
   );

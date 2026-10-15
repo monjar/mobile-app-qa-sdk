@@ -10,6 +10,12 @@
  * volatile reads, so callers on hot paths (the OkHttp interceptor) pay a flag
  * check and nothing else.
  *
+ * Requests are recorded when they finish, so the OkHttp interceptor also
+ * registers each one as it starts ([requestStarted]); one still running at
+ * freeze goes into the snapshot as `error: "in flight"` with `ms` up to the
+ * freeze. That keeps a request that hangs — often the bug being reported — in
+ * the report.
+ *
  * Thread-safe: records arrive from any thread (Snitch.log, network threads, the
  * main thread's lifecycle callbacks). Pure Kotlin; the clock is injected.
  */
@@ -50,6 +56,10 @@ class TimelineRecorder(private val clock: () -> Long = { System.currentTimeMilli
     private val network = ArrayDeque<TimelineEvent.Net>()
     private val screens = ArrayDeque<TimelineEvent.Screen>()
     private val app = ArrayDeque<TimelineEvent.App>()
+
+    /** Started and not yet recorded, by id, oldest first; `ms` is filled in at freeze. */
+    private val running = LinkedHashMap<Long, TimelineEvent.Net>()
+    private var lastRequestId = 0L
     private var dropped = 0
     private var currentScreen: String? = null
     private var logCount = 0L
@@ -60,6 +70,7 @@ class TimelineRecorder(private val clock: () -> Long = { System.currentTimeMilli
         consoleOn = active && console
         networkOn = active && network
         screensOn = active && screens
+        if (!networkOn) synchronized(this) { running.clear() }
     }
 
     /** Increases with every recorded log line (so a persister can skip unchanged rings). */
@@ -76,6 +87,29 @@ class TimelineRecorder(private val clock: () -> Long = { System.currentTimeMilli
         return true
     }
 
+    /**
+     * A request started at [t]; until [net] records it with the returned id, [freeze] reports it
+     * as in flight. 0 while network capture is off. At most TIMELINE_LIMITS.network are tracked;
+     * beyond that the oldest is forgotten (a request whose end never came).
+     */
+    fun requestStarted(t: Long, method: String, url: String): Long {
+        if (!networkOn) return 0
+        val e = TimelineEvent.net(t, method, url, null, null, null, null, TimelineEvent.NET_IN_FLIGHT)
+        synchronized(this) {
+            val id = ++lastRequestId
+            running[id] = e
+            if (running.size > TimelineLimits.NETWORK) running.remove(running.keys.first())
+            return id
+        }
+    }
+
+    /** The request [requestStarted] returned [id] for ended without being recorded. */
+    fun requestEnded(id: Long) {
+        if (id <= 0) return
+        synchronized(this) { running.remove(id) }
+    }
+
+    /** A finished (or failed) request; [requestId] is what [requestStarted] returned for it. */
     fun net(
         t: Long,
         method: String,
@@ -85,7 +119,9 @@ class TimelineRecorder(private val clock: () -> Long = { System.currentTimeMilli
         reqBytes: Long?,
         resBytes: Long?,
         error: String?,
+        requestId: Long = 0,
     ): Boolean {
+        requestEnded(requestId)
         if (!networkOn) return false
         val e = TimelineEvent.net(t, method, url, status, ms, reqBytes, resBytes, error)
         synchronized(this) { push(network, e, TimelineLimits.NETWORK) }
@@ -124,6 +160,9 @@ class TimelineRecorder(private val clock: () -> Long = { System.currentTimeMilli
             val out = ArrayList<TimelineEvent>(logs.size + network.size + screens.size + app.size)
             for (ring in listOf(app, screens, network, logs)) {
                 for (e in ring) if (e.t >= cutoff) out.add(e)
+            }
+            for (e in running.values) {
+                if (e.t >= cutoff && e.t <= now) out.add(e.copy(ms = (now - e.t).toDouble()))
             }
             return TimelineSnapshot(out, dropped, currentScreen, consoleOn, now)
         }

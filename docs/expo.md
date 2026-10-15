@@ -149,7 +149,8 @@ Off by default (`captureNetwork: true` turns it on). A request is stored as its 
 duration, request and response sizes and error text. The URL loses credentials and the fragment,
 and every query value becomes `*` (`/search?q=*&page=*`); the path is kept as sent, so think about
 identifiers in paths before turning it on. Headers and bodies are never read. Requests to the
-Snitch server itself are never recorded.
+Snitch server itself are never recorded. A request still running when the report opens is kept
+too, marked "in flight" with the time it had taken so far, so a request that hangs shows up.
 
 | | iOS | Android |
 |---|---|---|

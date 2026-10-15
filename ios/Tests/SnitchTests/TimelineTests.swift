@@ -197,6 +197,53 @@ final class TimelineRecorderTests: XCTestCase {
         XCTAssertEqual(snapshot.end, wall)
     }
 
+    func testRequestsStillRunningAtFreezeAreInFlight() throws {
+        allOn()
+        let slow = try XCTUnwrap(recorder.requestStarted(t: wall, method: "GET", url: "https://a.example/slow"))
+        let quick = try XCTUnwrap(recorder.requestStarted(t: wall + 10, method: "POST", url: "https://a.example/quick"))
+        wall += 40
+        recorder.network(
+            TimelineNet(t: wall - 30, method: "POST", url: "https://a.example/quick", status: 201, ms: 30, reqBytes: 2, resBytes: 0, error: nil),
+            requestID: quick
+        )
+        wall += 2_460
+        let nets = recorder.freeze().events.compactMap { event -> TimelineNet? in
+            if case let .net(net) = event { return net }
+            return nil
+        }
+        XCTAssertEqual(nets.map { $0.url }, ["https://a.example/quick", "https://a.example/slow"])
+        XCTAssertEqual(nets[1], TimelineNet(
+            t: wall - 2_500, method: "GET", url: "https://a.example/slow",
+            status: nil, ms: 2_500, reqBytes: nil, resBytes: nil, error: TimelineNet.inFlightError
+        ))
+
+        recorder.network(
+            TimelineNet(t: wall - 2_500, method: "GET", url: "https://a.example/slow", status: 200, ms: 2_500, reqBytes: nil, resBytes: 5, error: nil),
+            requestID: slow
+        )
+        XCTAssertEqual(recorder.freeze().events.count, 2, "both recorded, nothing left in flight")
+    }
+
+    func testInFlightTrackingFollowsTheNetworkSwitchAndIsBounded() throws {
+        XCTAssertNil(recorder.requestStarted(t: wall, method: "GET", url: "u"), "off")
+        allOn()
+        _ = recorder.requestStarted(t: wall, method: "GET", url: "https://a.example/gone")
+        recorder.configure(TimelineRecorder.Switches(on: true, console: true, network: false, screens: true))
+        allOn()
+        XCTAssertTrue(recorder.freeze().events.isEmpty, "turning network capture off forgets running requests")
+
+        for i in 0..<(TimelineLimits.network + 5) {
+            _ = recorder.requestStarted(t: wall, method: "GET", url: "https://a.example/\(i)")
+        }
+        let urls = recorder.freeze().events.compactMap { event -> String? in
+            if case let .net(net) = event { return net.url }
+            return nil
+        }
+        XCTAssertEqual(urls.count, TimelineLimits.network)
+        XCTAssertEqual(urls.first, "https://a.example/5", "the oldest are forgotten first")
+        XCTAssertEqual(recorder.freeze().dropped, 0, "not counted as dropped events")
+    }
+
     func testTouchesAreConvertedToWallClockAtFreeze() {
         allOn()
         recorder.touchDown(mono: 48_000, x: 0.123456, y: 0.5, fingers: 3)

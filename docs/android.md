@@ -152,7 +152,10 @@ What is recorded: the method, the URL **sanitized** (no credentials, no
 fragment, every query value replaced: `https://api.example.com/search?q=*`),
 the status, the duration to the end of the response body (or the failure), the
 request and response sizes, and the exception text of a failed request. Never
-headers, never bodies. Requests to your Snitch server are never recorded.
+headers, never bodies. Requests to your Snitch server are never recorded. With
+the interceptor, a request still running when the report opens (or whose body
+is still being read) is kept too, marked "in flight" with the time it had taken
+so far; `recordNetwork` only knows about requests once they have finished.
 
 The interceptor is safe to install unconditionally, also before Snitch starts
 and in store builds: until Snitch is active with network capture on it only
@@ -280,7 +283,10 @@ For UI tests, in code (`Snitch.debugOverrides(SnitchDebugOverrides(...))`, any
 time) or as meta-data `DEBUG_SERVER_URL`, `DEBUG_INGEST_KEY`, `DEBUG_AUTOREPORT`
 (seconds), `DEBUG_CANCEL_AFTER_MS`, `DEBUG_SHOW_ON_LAUNCH`, `DEBUG_CHUNK_BYTES`
 (caps the upload chunk size, never below 64 KiB, so tests exercise chunked
-uploads with small files). See spec §9 and §11.10.
+uploads with small files). See spec §9 and §11.10. In code only,
+`hideTesterNotice = true` keeps the one-time tester notice from appearing: it
+shows once the app has been idle for a couple of seconds and takes touches at
+the bottom of the screen, so tests that press there should set it.
 `Snitch.debugAwaitIdle(timeoutMs)` blocks a test thread until the auto-report
 has been uploaded. Ignored unless the release type is `debug`.
 

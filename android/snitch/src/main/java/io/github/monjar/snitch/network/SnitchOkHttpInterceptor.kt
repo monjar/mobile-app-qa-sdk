@@ -8,9 +8,10 @@
  * Snitch is active with `captureNetwork` on — and for requests to the Snitch
  * server — it only reads one flag and passes the request through untouched.
  *
- * While recording it notes the start time, sends the request unchanged and
- * wraps the response body in a byte-counting source, so the event's duration
- * and `resBytes` run to the end of the body (or its failure) — streaming keeps
+ * While recording it notes the start time (a report opened before the request
+ * ends shows it as in flight), sends the request unchanged and wraps the
+ * response body in a byte-counting source, so the event's duration and
+ * `resBytes` run to the end of the body (or its failure) — streaming keeps
  * working. Bodies that never get read are recorded when they are closed.
  * Responses without a body to read (HEAD, 101, 204, 304) are recorded at once,
  * and a failed request with its exception text. Headers and bodies are never
@@ -44,6 +45,7 @@ class SnitchOkHttpInterceptor : Interceptor {
         val method = request.method
         val startWall = System.currentTimeMillis()
         val startNanos = System.nanoTime()
+        val requestId = NetworkCapture.start(startWall, method, url)
         val reqBytes = try {
             request.body?.contentLength()?.takeIf { it >= 0 }
         } catch (_: IOException) {
@@ -52,18 +54,21 @@ class SnitchOkHttpInterceptor : Interceptor {
         val response = try {
             chain.proceed(request)
         } catch (e: IOException) {
-            NetworkCapture.record(startWall, method, url, null, elapsedMs(startNanos), reqBytes, null, NetworkCapture.describe(e))
+            NetworkCapture.record(startWall, method, url, null, elapsedMs(startNanos), reqBytes, null, NetworkCapture.describe(e), requestId)
+            throw e
+        } catch (e: RuntimeException) {
+            NetworkCapture.forget(requestId)
             throw e
         }
         val code = response.code
         val body = response.body
         if (body == null || code == 101 || code == 204 || code == 304 || method == "HEAD") {
             val resBytes = if (body == null || code == 101) null else 0L
-            NetworkCapture.record(startWall, method, url, code, elapsedMs(startNanos), reqBytes, resBytes, null)
+            NetworkCapture.record(startWall, method, url, code, elapsedMs(startNanos), reqBytes, resBytes, null, requestId)
             return response
         }
         val counted = CountingBody(body) { bytes, error ->
-            NetworkCapture.record(startWall, method, url, code, elapsedMs(startNanos), reqBytes, bytes, error)
+            NetworkCapture.record(startWall, method, url, code, elapsedMs(startNanos), reqBytes, bytes, error, requestId)
         }
         return response.newBuilder().body(counted).build()
     }
