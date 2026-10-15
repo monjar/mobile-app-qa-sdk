@@ -31,6 +31,8 @@ export interface UserView {
   createdAt: number;
   lastLoginAt: number | null;
   disabled: boolean;
+  /** Invited and hasn't set a password yet. */
+  pending: boolean;
 }
 
 export interface Me {
@@ -43,6 +45,8 @@ export interface AuthProviders {
   password: true;
   /** Sign in with GitHub (OAuth app configured through SNITCH_GITHUB_CLIENT_ID / _SECRET). */
   github: boolean;
+  /** "Forgot password?" can email a reset link (SMTP is configured). */
+  passwordReset: boolean;
 }
 
 export const LoginRequest = z.object({
@@ -57,9 +61,50 @@ export const UserCreate = z.object({
   email: z.email().max(254),
   name: z.string().max(120).optional(),
   role: UserRole,
-  password: z.string().min(PASSWORD_MIN_LENGTH).max(512),
+  /** Omit to invite: they get an email with a link to choose their own password. */
+  password: z.string().min(PASSWORD_MIN_LENGTH).max(512).optional(),
 });
 export type UserCreate = z.infer<typeof UserCreate>;
+
+/** A one-time link to choose a password: an invite, or a reset an admin sent. */
+export interface AccountLink {
+  url: string;
+  expiresAt: number;
+  /** False when the server can't send email (no SMTP) or the send failed: pass `url` on yourself. */
+  emailed: boolean;
+  /** Why the email didn't go out, when it didn't. */
+  error: string | null;
+}
+
+/** POST /users: the new user, and their invite when no password was set. */
+export interface UserCreated {
+  user: UserView;
+  invite: AccountLink | null;
+}
+
+/** POST /auth/password-reset: always answers 200, whether or not the email has an account. */
+export const PasswordResetRequest = z.object({ email: z.email().max(254) });
+export type PasswordResetRequest = z.infer<typeof PasswordResetRequest>;
+
+export const ACCOUNT_TOKEN_PURPOSES = ['invite', 'reset'] as const;
+export type AccountTokenPurpose = (typeof ACCOUNT_TOKEN_PURPOSES)[number];
+
+/** GET /auth/account-token?token=…: what a set-password link is for, while it's still valid. */
+export interface AccountTokenInfo {
+  purpose: AccountTokenPurpose;
+  email: string;
+  name: string | null;
+  expiresAt: number;
+}
+
+/** POST /auth/set-password: uses an invite or reset link once, and signs in. */
+export const SetPasswordRequest = z.object({
+  token: z.string().min(1).max(200),
+  password: z.string().min(PASSWORD_MIN_LENGTH).max(512),
+  /** Invites only: the name to show for them. */
+  name: z.string().max(120).optional(),
+});
+export type SetPasswordRequest = z.infer<typeof SetPasswordRequest>;
 
 export const UserUpdate = z
   .object({
@@ -313,6 +358,8 @@ export const TICKET_EVENT_KINDS = [
   'notification_failed',
   /** The ticket was marked a duplicate; data: { duplicateOfId, key }. */
   'duplicate_marked',
+  /** Media couldn't be committed to GitHub, so the issue links to Snitch instead; data: { integrationId, integration, error }. */
+  'media_upload_failed',
 ] as const;
 export type TicketEventKind = (typeof TICKET_EVENT_KINDS)[number];
 
@@ -383,6 +430,25 @@ export const TicketPatch = z
   .partial();
 export type TicketPatch = z.infer<typeof TicketPatch>;
 
+const BulkIds = z.array(z.string().min(1).max(64)).min(1).max(200);
+
+/** POST /tickets/bulk: one change to many tickets. Deleting needs an admin. */
+export const TicketBulkRequest = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('assign'), ids: BulkIds, assigneeUserId: z.string().nullable() }),
+  z.object({ action: z.literal('status'), ids: BulkIds, status: TicketStatus }),
+  z.object({ action: z.literal('escalate'), ids: BulkIds, integrationId: z.string().min(1) }),
+  z.object({ action: z.literal('delete'), ids: BulkIds }),
+]);
+export type TicketBulkRequest = z.infer<typeof TicketBulkRequest>;
+export type TicketBulkAction = TicketBulkRequest['action'];
+
+export interface TicketBulkResult {
+  /** Tickets the action changed (or queued, for escalate). */
+  done: string[];
+  /** Tickets left alone, and why: not found, already escalated, another project's integration, nothing to change. */
+  skipped: { id: string; reason: string }[];
+}
+
 export const CommentCreate = z.object({ body: z.string().min(1).max(10_000) });
 export type CommentCreate = z.infer<typeof CommentCreate>;
 
@@ -394,12 +460,31 @@ export type ShareLinkCreate = z.infer<typeof ShareLinkCreate>;
 
 // ── Integrations & routing ──────────────────────────────────────────────────
 
+/**
+ * How a GitHub issue shows the report's media:
+ * - `repo`: the screenshot, video, timeline and logs are committed to the GITHUB_MEDIA_BRANCH branch of the
+ *   repository (or of `mediaRepo`), so whoever can see the repo sees them in the issue and nobody else does.
+ *   The token needs Contents: write.
+ * - `links`: public, expiring Snitch share links (GitHub's image proxy caches them).
+ * - `none`: the issue says the media is in Snitch.
+ */
+export const GITHUB_MEDIA_MODES = ['repo', 'links', 'none'] as const;
+export type GithubMediaMode = (typeof GITHUB_MEDIA_MODES)[number];
+export const GITHUB_MEDIA_BRANCH = 'snitch-media';
+
 export const GithubConfig = z.object({
   owner: z.string().regex(/^[A-Za-z0-9-]{1,39}$/),
   repo: z.string().regex(/^[A-Za-z0-9._-]{1,100}$/),
   labels: z.array(z.string().min(1).max(50)).max(10).default([]),
   assignees: z.array(z.string().min(1).max(39)).max(10).default([]),
-  /** Put public, expiring share links to the screenshot/video in the issue. Off by default: GitHub caches images. */
+  /** Unset on integrations saved before 0.4: `links` when includeShareLinks is on, else `none` (githubMediaMode). */
+  media: z.enum(GITHUB_MEDIA_MODES).optional(),
+  /** `repo` media: keep it in this repository ("owner/name") instead, so clones of the app's repo stay small. */
+  mediaRepo: z
+    .string()
+    .regex(/^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/)
+    .optional(),
+  /** Before 0.4: put public, expiring share links to the screenshot/video in the issue. `media: 'links'` now. */
   includeShareLinks: z.boolean().default(false),
   shareTtlDays: z.number().int().min(1).max(365).default(30),
   /** Override for GitHub Enterprise; defaults to https://api.github.com. */
@@ -413,6 +498,10 @@ export const GithubConfig = z.object({
   syncComments: z.boolean().default(false),
 });
 export type GithubConfig = z.infer<typeof GithubConfig>;
+
+export function githubMediaMode(cfg: Pick<GithubConfig, 'media' | 'includeShareLinks'>): GithubMediaMode {
+  return cfg.media ?? (cfg.includeShareLinks ? 'links' : 'none');
+}
 
 export const EmailConfig = z.object({
   to: z.array(z.email()).min(1).max(20),

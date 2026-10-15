@@ -50,10 +50,10 @@ async function signIn(h: Harness, code: string, opts: { next?: string; state?: s
 describe('sign in with GitHub', () => {
   it('advertises the providers', async () => {
     const plain = await harness();
-    expect(await (await plain.app.request('/api/admin/auth/providers')).json()).toEqual({ password: true, github: false } satisfies AuthProviders);
+    expect(await (await plain.app.request('/api/admin/auth/providers')).json()).toEqual({ password: true, github: false, passwordReset: true } satisfies AuthProviders);
     expect((await plain.app.request('/api/admin/auth/github/start')).status).toBe(404);
     const { h } = await setup();
-    expect(await (await h.app.request('/api/admin/auth/providers')).json()).toEqual({ password: true, github: true });
+    expect(await (await h.app.request('/api/admin/auth/providers')).json()).toEqual({ password: true, github: true, passwordReset: true });
   });
 
   it('sends the browser to GitHub with a state bound to a short-lived cookie', async () => {

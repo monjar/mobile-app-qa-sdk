@@ -22,6 +22,11 @@ export const Logo = (p: SVGProps<SVGSVGElement>) => (
     <path d="M11 21c3 2 7 2 10 0" stroke="var(--panel)" strokeWidth="2" fill="none" strokeLinecap="round" />
   </svg>
 );
+export const Menu = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M4 6h16M4 12h16M4 18h16" />
+  </svg>
+);
 export const Inbox = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
     <path d="M22 12h-6l-2 3h-4l-2-3H2" />

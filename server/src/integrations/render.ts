@@ -12,8 +12,8 @@ export interface RenderInput {
   typeLabel: string;
   projectName: string;
   dashboardUrl: string;
-  /** Public share links, only when the integration opted in. */
-  links: { screenshot?: string; video?: string };
+  /** Where the media can be seen outside Snitch: public share links, or (GitHub) files committed to the repo. */
+  links: { screenshot?: string; video?: string; files?: { name: string; url: string }[] };
   hasScreenshot: boolean;
   videoSeconds: number | null;
   /** From the timeline attachment (GitHub and email only; null without one). */
@@ -73,6 +73,7 @@ export function githubIssue(i: RenderInput): { title: string; body: string } {
   if (i.links.video) media.push(`🎬 [Screen recording (${i.videoSeconds ?? '?'} s)](${i.links.video})`);
   if (!i.links.screenshot && i.hasScreenshot) media.push('📷 Screenshot attached in Snitch');
   if (!i.links.video && i.videoSeconds) media.push(`🎬 ${i.videoSeconds} s screen recording attached in Snitch`);
+  if (i.links.files?.length) media.push(`📎 ${i.links.files.map((f) => `[${f.name}](${f.url})`).join(' · ')}`);
   const body = [
     quote,
     '',

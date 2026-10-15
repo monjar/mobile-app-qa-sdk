@@ -268,4 +268,19 @@ export const MIGRATIONS: readonly string[] = [
     updated_at INTEGER NOT NULL
   );
   `,
+
+  // 3 — 0.4: email invites and password-reset links
+  `
+  -- One-time links to choose a password. Only the token's SHA-256 is stored.
+  CREATE TABLE account_tokens (
+    id_hash TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    purpose TEXT NOT NULL CHECK (purpose IN ('invite', 'reset')),
+    created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    used_at INTEGER
+  );
+  CREATE INDEX account_tokens_by_user ON account_tokens(user_id, purpose);
+  `,
 ];

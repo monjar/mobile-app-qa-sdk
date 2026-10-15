@@ -5,7 +5,7 @@
  * database leak doesn't hand out live sessions. Expiry slides: each use more
  * than an hour after the last extension pushes it out by the full lifetime.
  */
-import type { AuditEntryView, UserRole, UserView } from '@snitch/contract';
+import type { AccountTokenPurpose, AuditEntryView, UserRole, UserView } from '@snitch/contract';
 import type { Db } from '../db/open';
 import { hashPassword } from '../crypto/passwords';
 import { randomToken, sha256Hex } from '../crypto/tokens';
@@ -36,8 +36,12 @@ export function toUserView(r: UserRow): UserView {
     createdAt: r.created_at,
     lastLoginAt: r.last_login_at,
     disabled: r.disabled_at !== null,
+    pending: r.password_hash === INVITED,
   };
 }
+
+/** The password hash of an invited user who hasn't chosen one yet; verifyPassword never accepts it. */
+export const INVITED = '';
 
 export class UsersRepo {
   constructor(
@@ -56,6 +60,16 @@ export class UsersRepo {
     this.db
       .prepare('INSERT INTO users (id, email, name, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?)')
       .run(id, input.email.trim(), input.name ?? null, hash, input.role, t);
+    return this.view(id)!;
+  }
+
+  /** An invited user: no password until they follow their invite link. */
+  createInvited(input: { email: string; name?: string | null; role: UserRole }): UserView {
+    const t = this.now();
+    const id = ulid(t);
+    this.db
+      .prepare('INSERT INTO users (id, email, name, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(id, input.email.trim(), input.name ?? null, INVITED, input.role, t);
     return this.view(id)!;
   }
 
@@ -183,6 +197,65 @@ export class SessionsRepo {
 }
 
 export const SESSION_DAY = DAY_MS;
+
+export interface AccountTokenRow {
+  id_hash: string;
+  user_id: string;
+  purpose: AccountTokenPurpose;
+  created_by: string | null;
+  created_at: number;
+  expires_at: number;
+  used_at: number | null;
+}
+
+/**
+ * One-time links to choose a password (invites, resets). Like sessions, only
+ * the token's SHA-256 is stored. A new link for the same user and purpose
+ * replaces the old one, and using any link spends every other link the user has.
+ */
+export class AccountTokensRepo {
+  constructor(
+    private readonly db: Db,
+    private readonly now: Clock,
+  ) {}
+
+  create(userId: string, purpose: AccountTokenPurpose, ttlMs: number, createdBy: string | null): { token: string; expiresAt: number } {
+    const t = this.now();
+    const token = randomToken(32);
+    const expiresAt = t + ttlMs;
+    this.db.transaction(() => {
+      this.db.prepare('DELETE FROM account_tokens WHERE user_id = ? AND purpose = ? AND used_at IS NULL').run(userId, purpose);
+      this.db
+        .prepare('INSERT INTO account_tokens (id_hash, user_id, purpose, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(sha256Hex(token), userId, purpose, createdBy, t, expiresAt);
+    })();
+    return { token, expiresAt };
+  }
+
+  /** The unused, unexpired link for `token`, with its user. */
+  lookup(token: string): { row: AccountTokenRow; user: UserRow } | null {
+    const row = this.db.prepare('SELECT * FROM account_tokens WHERE id_hash = ?').get(sha256Hex(token)) as AccountTokenRow | undefined;
+    if (!row || row.used_at !== null || row.expires_at <= this.now()) return null;
+    const user = this.db.prepare('SELECT * FROM users WHERE id = ?').get(row.user_id) as UserRow | undefined;
+    return user ? { row, user } : null;
+  }
+
+  /** Marks `token` used and drops the user's other open links. False if it was already spent (a race). */
+  consume(token: string): boolean {
+    const idHash = sha256Hex(token);
+    return this.db.transaction(() => {
+      const row = this.db.prepare('SELECT user_id FROM account_tokens WHERE id_hash = ? AND used_at IS NULL').get(idHash) as { user_id: string } | undefined;
+      if (!row) return false;
+      this.db.prepare('UPDATE account_tokens SET used_at = ? WHERE id_hash = ?').run(this.now(), idHash);
+      this.db.prepare('DELETE FROM account_tokens WHERE user_id = ? AND used_at IS NULL').run(row.user_id);
+      return true;
+    })();
+  }
+
+  purgeExpired(): number {
+    return this.db.prepare('DELETE FROM account_tokens WHERE expires_at <= ?').run(this.now() - DAY_MS).changes;
+  }
+}
 
 export class AuditRepo {
   constructor(

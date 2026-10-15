@@ -61,8 +61,8 @@ SNITCH_PUBLIC_URL=http://localhost:8080 SNITCH_DATA_DIR=./data node server/dist/
 | `SNITCH_SECRET_KEY` | generated into `<data>/secret.key` | Encrypts integration tokens at rest. ≥ 32 characters. Set it explicitly if your data volume is not private. |
 | `SNITCH_PREVIOUS_SECRET_KEY` | — | Old key during rotation; secrets are still readable with it. |
 | `SNITCH_BOOTSTRAP_ADMIN_EMAIL` / `_PASSWORD` | — | Creates the first admin on boot instead of the setup link. |
-| `SNITCH_SMTP_URL` | — | `smtp://user:pass@host:587` or `smtps://…:465`. Without it, email escalations fail with a clear error. |
-| `SNITCH_MAIL_FROM` | `Snitch <snitch@localhost>` | Sender for escalation emails. |
+| `SNITCH_SMTP_URL` | — | `smtp://user:pass@host:587` or `smtps://…:465`. Needed for invites, "Forgot password?", notifications and email escalations; without it, email escalations fail with a clear error and invite links are shown to the admin instead. |
+| `SNITCH_MAIL_FROM` | `Snitch <snitch@localhost>` | Sender for every email Snitch sends. |
 | `SNITCH_STORAGE` | `fs` | `fs` (data volume) or `s3`. |
 | `SNITCH_S3_ENDPOINT`, `_BUCKET`, `_REGION`, `_ACCESS_KEY_ID`, `_SECRET_ACCESS_KEY`, `_FORCE_PATH_STYLE` | — / `auto` / `true` | Any S3-compatible store (AWS, Cloudflare R2, SeaweedFS, Garage). |
 | `SNITCH_RETENTION_DAYS` | `90` | Tickets older than this are deleted with their media. `0` keeps everything. Projects can override. |
@@ -95,14 +95,23 @@ docker exec snitch snitch backup --out /data/backup-$(date +%F).db
 
 `project:create --ingest-key` lets you pick the key up front, so an app can be built with it before the server exists.
 
+## Triage in bulk
+
+In the inbox, tick tickets (or press <kbd>x</kbd> on the highlighted one; the checkbox above the list selects every
+loaded ticket) to assign them, move them to a status, escalate them or delete them together. Escalating needs the
+tickets to be from one project, since integrations belong to a project; tickets already escalated there are skipped.
+Deleting is for admins and removes the media for good. Assigning more than three tickets at once sends the assignee one
+email listing them instead of one each.
+
 ## Escalation
 
 Integrations are configured per project in the dashboard (**Settings → Integrations**):
 
-- **GitHub**: a fine-grained personal access token restricted to the target repository with *Issues: Read and write*.
-  The issue body contains the description, a device table and a link to the ticket. GitHub has no attachment API;
-  tick *Include public links* to embed the screenshot and link the video through expiring share links. That option
-  is off by default because GitHub caches images and your reports may show personal data.
+- **GitHub**: a fine-grained personal access token restricted to the target repository with *Issues: Read and write*
+  (plus *Contents: Read and write* when the media goes into the repository; see below).
+  The issue body contains the description, the screenshot, the video, a device table, what happened just before
+  the report (errors and failed requests from the timeline) and a link to the ticket. See
+  [Media in GitHub issues](#media-in-github-issues).
 - **Email**: needs `SNITCH_SMTP_URL`. The screenshot is attached inline, and the video is linked.
 - **Webhook**: `slack` (incoming webhook), `discord`, or `generic` JSON. Generic payloads are signed:
   `X-Snitch-Signature: sha256=HMAC_SHA256(secret, "<X-Snitch-Timestamp>.<raw body>")`.
@@ -115,6 +124,30 @@ After 8 attempts, or immediately for permanent errors such as a revoked token, t
 When a report carries a timeline (SDK 0.3), GitHub issues and emails get a short **Before the report** section: the
 screen the tester was on, and the last ten error log lines and failed requests, one line each. The full timeline stays in
 the dashboard.
+
+### Media in GitHub issues
+
+GitHub has no API for issue attachments, so each GitHub integration picks one of three ways to show the screenshot and
+video (**Settings → Integrations → Edit**):
+
+- **Committed to the repository** (the default for new integrations). Snitch commits the report's screenshot, video,
+  timeline and logs to the `snitch-media` branch under the ticket's key (`MOCH-42/screenshot.jpg`), one commit per
+  report, and the issue shows the screenshot and links the rest. GitHub only serves those files to people who can see
+  the repository, so a private repo keeps them private, and someone reading the issue (or an agent working on it)
+  needs nothing from Snitch. The token needs *Contents: Read and write* as well. Things to know:
+  - The files stay in the branch's history; deleting a ticket in Snitch doesn't remove them. Delete the branch to
+    purge everything.
+  - A plain `git clone` downloads every branch, so the media adds to every full clone of the repo (CI checkouts of one
+    branch are unaffected). To avoid that, set *Keep them in another repository* to a separate (private) repo the
+    token can write to; the issue links there instead.
+  - If the commit is refused (no *Contents* permission, an empty repository), the issue is still created, says the
+    media is in Snitch, and the ticket records why.
+- **Public links**: expiring Snitch share links (30 days). Anyone with a link can open it, and GitHub's image proxy
+  caches the screenshot.
+- **Not included**: the issue says the media is in Snitch.
+
+Integrations created before 0.4 keep what they had: public links if *Include public links* was ticked, otherwise not
+included.
 
 ### GitHub two-way sync
 
@@ -162,6 +195,20 @@ The project's **Devices** page lists those installs: app version and build, the 
 signals behind it, OS, model, whether Snitch was enabled for it, and how many reports it sent. Per build it shows how
 many installs checked in, by release type, so a build whose SDK never came up (wrong release type, missing key) stands
 out. Installs not seen for 180 days are forgotten.
+
+## Team, invites and passwords
+
+Admins add people under **Team**. By default that sends an invite: an email with a link to choose their own password,
+which works once, for 7 days (**Resend invite** replaces it). Untick **Email them an invite** to set a temporary password
+instead.
+
+Anyone can use **Forgot password?** on the sign-in page to get a reset link (valid for 1 hour, at most three emails per
+address an hour). The page answers the same whether or not the address has an account. Admins can also send someone a
+reset link from **Team → Reset password**; that one lasts 24 hours. Using a link signs out every other session of that
+user.
+
+All of this needs `SNITCH_SMTP_URL`. Without it the sign-in page tells people to ask an admin, and the dashboard shows the
+admin each invite or reset link to pass on themselves. Only the SHA-256 of a link's token is stored.
 
 ## Sign in with GitHub
 

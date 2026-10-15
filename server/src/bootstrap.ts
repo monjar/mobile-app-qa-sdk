@@ -12,7 +12,7 @@ import { buildMailer } from './mail/mailer';
 import { FsBlobStore } from './storage/fsBlobStore';
 import { S3BlobStore } from './storage/s3BlobStore';
 import { ProjectsRepo } from './repo/projects';
-import { AuditRepo, SessionsRepo, UsersRepo } from './repo/users';
+import { AccountTokensRepo, AuditRepo, SessionsRepo, UsersRepo } from './repo/users';
 import { TicketsRepo } from './repo/tickets';
 import { IntegrationsRepo } from './repo/integrations';
 import { JobsRepo } from './repo/jobs';
@@ -40,6 +40,7 @@ export function buildDeps(config: ServerConfig, overrides: Partial<Deps> = {}): 
     projects,
     users: new UsersRepo(db, now),
     sessions: new SessionsRepo(db, now, config.sessionDays * DAY_MS),
+    accountTokens: new AccountTokensRepo(db, now),
     audit: new AuditRepo(db, now),
     tickets: new TicketsRepo(db, now, projects),
     integrations: new IntegrationsRepo(db, now, box, config.publicUrl),
@@ -54,6 +55,7 @@ export function buildDeps(config: ServerConfig, overrides: Partial<Deps> = {}): 
       loginPerEmail: new RateLimiter(10, 15 * MINUTE_MS, now),
       // GitHub sends a burst when someone bulk-closes issues; this only stops floods.
       hooksPerIp: new RateLimiter(300, MINUTE_MS, now),
+      resetEmailsPerAddress: new RateLimiter(3, HOUR_MS, now),
     },
     wake: () => undefined,
     setupToken: { value: null },

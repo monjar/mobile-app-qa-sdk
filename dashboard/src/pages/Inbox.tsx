@@ -1,17 +1,30 @@
 /**
  * The triage queue: tickets by status, newest first, filterable, with j/k/Enter
  * keyboard navigation. Polls so new reports appear without a reload.
+ *
+ * Tickets can be selected (checkbox, or x on the highlighted row) and assigned,
+ * moved to a status, escalated or deleted together.
  */
 import { useEffect, useMemo, useState } from 'react';
-import { useInfiniteQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation } from 'wouter';
-import { PLATFORMS, RELEASE_TYPES, TICKET_STATUSES, type TicketList, type TicketStatus, type TicketSummary } from '@snitch/contract';
-import { get } from '../lib/api';
+import {
+  PLATFORMS,
+  RELEASE_TYPES,
+  TICKET_STATUSES,
+  type TicketBulkRequest,
+  type TicketBulkResult,
+  type TicketList,
+  type TicketStatus,
+  type TicketSummary,
+} from '@snitch/contract';
+import { errorText, get, post } from '../lib/api';
+import { useAuth } from '../lib/auth';
 import { RELEASE_LABEL, STATUS_LABEL, osName, relativeTime } from '../lib/format';
 import { useSelectedProject } from '../lib/project';
-import { useProjects } from '../lib/queries';
+import { qk, useIntegrations, useProjects, useUsers } from '../lib/queries';
 import { Film, Image, Search } from '../components/icons';
-import { Avatar, Empty, IntegrationIcon, StatusPill } from '../components/ui';
+import { Avatar, Dialog, Empty, IntegrationIcon, StatusPill, useToast } from '../components/ui';
 
 type Tab = 'open' | TicketStatus | 'all';
 const TABS: Tab[] = ['open', ...TICKET_STATUSES, 'all'];
@@ -36,6 +49,7 @@ export function Inbox() {
   const [q, setQ] = useState('');
   const query = useDebounced(q.trim(), 250);
   const [selected, setSelected] = useState(0);
+  const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
   const [, navigate] = useLocation();
 
   const params = useMemo(() => {
@@ -66,12 +80,23 @@ export function Inbox() {
   }, [project, projects.data]);
   const projectName = (id: string) => projects.data?.find((p) => p.id === id)?.name;
 
+  const toggle = (id: string) =>
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+
   useEffect(() => setSelected(0), [params]);
+  useEffect(() => setChecked(new Set()), [params]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
+      if (document.querySelector('.backdrop')) return;
       if (e.key === 'j') setSelected((s) => Math.min(s + 1, items.length - 1));
       else if (e.key === 'k') setSelected((s) => Math.max(s - 1, 0));
+      else if (e.key === 'x' && items[selected]) toggle(items[selected].id);
+      else if (e.key === 'Escape') setChecked(new Set());
       else if (e.key === 'Enter' && items[selected]) navigate(`/tickets/${items[selected].id}`);
       else if (e.key === '/') {
         e.preventDefault();
@@ -86,8 +111,8 @@ export function Inbox() {
     <div className="page">
       <div className="page-header">
         <h1>{project ? project.name : 'All projects'}</h1>
-        <span className="muted small">
-          <span className="kbd">j</span> <span className="kbd">k</span> to move, <span className="kbd">↵</span> to open, <span className="kbd">/</span> to search
+        <span className="muted small hide-mobile">
+          <span className="kbd">j</span> <span className="kbd">k</span> to move, <span className="kbd">x</span> to select, <span className="kbd">↵</span> to open, <span className="kbd">/</span> to search
         </span>
       </div>
 
@@ -132,6 +157,7 @@ export function Inbox() {
       </div>
 
       <div className="card">
+        {items.length > 0 && <BulkBar items={items} checked={checked} setChecked={setChecked} />}
         {tickets.isLoading ? (
           <div className="empty">Loading…</div>
         ) : tickets.isError ? (
@@ -143,10 +169,13 @@ export function Inbox() {
         ) : (
           <ul className="ticket-list">
             {items.map((t, i) => (
-              <li key={t.id}>
-                <Link href={`/tickets/${t.id}`} className={`ticket-row${i === selected ? ' selected' : ''}`} onMouseEnter={() => setSelected(i)}>
+              <li key={t.id} className={`ticket-item${i === selected ? ' selected' : ''}${checked.has(t.id) ? ' checked' : ''}`} onMouseEnter={() => setSelected(i)}>
+                <label className="ticket-check">
+                  <input type="checkbox" checked={checked.has(t.id)} onChange={() => toggle(t.id)} aria-label={`Select ${t.key}`} />
+                </label>
+                <Link href={`/tickets/${t.id}`} className="ticket-row">
                   <span className="ticket-key">{t.key}</span>
-                  <span style={{ minWidth: 0 }}>
+                  <span className="ticket-main">
                     <div className="ticket-title">{t.title}</div>
                     <div className="ticket-meta">
                       <StatusPill status={t.status} />
@@ -191,6 +220,144 @@ export function Inbox() {
             {tickets.isFetchingNextPage ? 'Loading…' : 'Load more'}
           </button>
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The selection toolbar above the list: select all loaded tickets, then assign, set a status,
+ * escalate (to one of the project's integrations, when they're all from one project) or delete.
+ */
+function BulkBar({ items, checked, setChecked }: { items: TicketSummary[]; checked: ReadonlySet<string>; setChecked: (s: ReadonlySet<string>) => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const { user } = useAuth();
+  const users = useUsers();
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const chosen = items.filter((t) => checked.has(t.id));
+  const projectIds = [...new Set(chosen.map((t) => t.projectId))];
+  const oneProject = projectIds.length === 1 ? projectIds[0] : undefined;
+  const integrations = useIntegrations(oneProject);
+  const all = chosen.length === items.length;
+
+  const run = useMutation({
+    mutationFn: (req: TicketBulkRequest) => post<TicketBulkResult>('/tickets/bulk', req),
+    onSuccess: (r, req) => {
+      setChecked(new Set());
+      void qc.invalidateQueries({ queryKey: ['tickets'] });
+      void qc.invalidateQueries({ queryKey: qk.projects });
+      for (const id of r.done) void qc.invalidateQueries({ queryKey: qk.ticket(id) });
+      const verb = { assign: 'Assigned', status: 'Updated', escalate: 'Escalated', delete: 'Deleted' }[req.action];
+      const reasons = [...new Set(r.skipped.map((s) => s.reason))].join(', ');
+      toast(`${verb} ${r.done.length} ticket${r.done.length === 1 ? '' : 's'}${r.skipped.length ? ` · skipped ${r.skipped.length} (${reasons})` : ''}`);
+    },
+    onError: (e) => toast(errorText(e)),
+  });
+  const ids = chosen.map((t) => t.id);
+
+  return (
+    <div className={`bulk-bar${chosen.length ? ' active' : ''}`}>
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={chosen.length > 0 && all}
+          ref={(el) => {
+            if (el) el.indeterminate = chosen.length > 0 && !all;
+          }}
+          onChange={() => setChecked(all ? new Set() : new Set(items.map((t) => t.id)))}
+          aria-label="Select all"
+        />
+        {chosen.length ? `${chosen.length} selected` : 'Select'}
+      </label>
+      {chosen.length > 0 && (
+        <>
+          <select
+            value=""
+            aria-label="Assign selected"
+            disabled={run.isPending}
+            onChange={(e) => e.target.value && run.mutate({ action: 'assign', ids, assigneeUserId: e.target.value === '-' ? null : e.target.value })}
+          >
+            <option value="">Assign…</option>
+            <option value="-">Unassigned</option>
+            {users.data
+              ?.filter((u) => !u.disabled)
+              .map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name ?? u.email}
+                </option>
+              ))}
+          </select>
+          <select value="" aria-label="Set status of selected" disabled={run.isPending} onChange={(e) => e.target.value && run.mutate({ action: 'status', ids, status: e.target.value as TicketStatus })}>
+            <option value="">Status…</option>
+            {TICKET_STATUSES.map((s) => (
+              <option key={s} value={s}>
+                {STATUS_LABEL[s]}
+              </option>
+            ))}
+          </select>
+          <select
+            value=""
+            aria-label="Escalate selected"
+            disabled={run.isPending || !oneProject}
+            title={oneProject ? undefined : 'Select tickets from one project to escalate them together'}
+            onChange={(e) => e.target.value && run.mutate({ action: 'escalate', ids, integrationId: e.target.value })}
+          >
+            <option value="">Escalate…</option>
+            {integrations.data
+              ?.filter((i) => i.enabled)
+              .map((i) => (
+                <option key={i.id} value={i.id}>
+                  {i.name}
+                </option>
+              ))}
+          </select>
+          {user?.role === 'admin' && (
+            <button type="button" className="small danger" disabled={run.isPending} onClick={() => setConfirmDelete(true)}>
+              Delete
+            </button>
+          )}
+          <span className="spacer" />
+          <button type="button" className="small ghost" onClick={() => setChecked(new Set())}>
+            Clear
+          </button>
+        </>
+      )}
+      {confirmDelete && (
+        <Dialog
+          title={`Delete ${chosen.length} ticket${chosen.length === 1 ? '' : 's'}?`}
+          onClose={() => setConfirmDelete(false)}
+          footer={
+            <>
+              <button type="button" onClick={() => setConfirmDelete(false)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary danger-fill"
+                disabled={run.isPending}
+                onClick={() => {
+                  setConfirmDelete(false);
+                  run.mutate({ action: 'delete', ids });
+                }}
+              >
+                Delete
+              </button>
+            </>
+          }
+        >
+          <p style={{ margin: 0 }}>
+            This removes their screenshots, videos, timelines and comments for good. GitHub issues and emails already sent stay where they are.
+          </p>
+          <ul className="small muted" style={{ margin: '12px 0 0', paddingLeft: 18 }}>
+            {chosen.slice(0, 8).map((t) => (
+              <li key={t.id}>
+                {t.key} {t.title}
+              </li>
+            ))}
+            {chosen.length > 8 && <li>…and {chosen.length - 8} more</li>}
+          </ul>
+        </Dialog>
       )}
     </div>
   );
