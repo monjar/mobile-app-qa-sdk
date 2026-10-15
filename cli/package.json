@@ -1,0 +1,48 @@
+{
+  "name": "snitch-cli",
+  "version": "0.4.0",
+  "description": "Snitch from the terminal and from coding agents: read QA tickets with their screenshots, video frames, timelines and logs, comment and change status. Includes an MCP server.",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/monjar/mobile-app-qa-sdk.git",
+    "directory": "cli"
+  },
+  "homepage": "https://github.com/monjar/mobile-app-qa-sdk/blob/master/docs/cli.md",
+  "keywords": [
+    "snitch",
+    "qa",
+    "bug-report",
+    "mcp",
+    "cli"
+  ],
+  "bin": {
+    "snitch": "dist/snitch.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "optionalDependencies": {
+    "@napi-rs/keyring": "^2.1.1"
+  },
+  "devDependencies": {
+    "@hono/node-server": "^1.19.17",
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "@snitch/contract": "*",
+    "@types/node": "^24.0.0",
+    "esbuild": "^0.28.2",
+    "typescript": "~5.9.3",
+    "vitest": "^5.0.3",
+    "zod": "^4.1.0"
+  }
+}

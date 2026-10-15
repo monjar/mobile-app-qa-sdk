@@ -18,6 +18,7 @@ const SPOTS = [
   ['contract/package.json', /"version": "([^"]+)"/],
   ['server/package.json', /"version": "([^"]+)"/],
   ['dashboard/package.json', /"version": "([^"]+)"/],
+  ['cli/package.json', /"version": "([^"]+)"/],
   ['react-native/package.json', /"version": "([^"]+)"/],
   ['ios/Sources/Snitch/Core/Support.swift', /enum SnitchVersion \{\s*static let current = "([^"]+)"/],
   ['android/snitch/src/main/java/io/github/monjar/snitch/SnitchVersion.kt', /SDK_VERSION\s*=\s*"([^"]+)"/],

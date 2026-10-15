@@ -17,6 +17,9 @@ them and escalates to **GitHub issues, email, Slack, Discord or any webhook**, w
   mark up or blur the screenshot, and after an unexpected exit the app offers to report it with the crash diagnostic.
 - **Triage that keeps up.** Duplicate suggestions, two-way GitHub issue sync (status and comments), assignment and
   "fixed in build" emails, sign-in with GitHub, and a Devices page that shows which builds have Snitch running.
+- **Reports your agents can read.** `npx snitch-cli` downloads a report with its video cut into frames and the
+  timeline lined up with them, and `snitch mcp` hands the same to Claude Code, Cursor and other MCP clients, screenshot
+  and frames as images. Personal API tokens, approved from the dashboard.
 - **One container** for the server: SQLite plus a volume, or S3. Run it with `docker run`, Compose with automatic TLS,
   or Fly.io. Uploads resume where they stopped; the database can back itself up to a bucket on a schedule.
 
@@ -62,6 +65,7 @@ inbox.
 ## Docs
 
 - [Server: install, configure, operate](docs/server.md)
+- [The snitch CLI and MCP server](docs/cli.md): tickets from the terminal and from coding agents
 - [iOS](docs/ios.md) · [Android](docs/android.md) · [React Native](docs/react-native.md) · [Expo](docs/expo.md)
 - [Architecture and trade-offs](docs/architecture.md)
 - [Privacy and data handling](docs/privacy.md)
@@ -74,6 +78,7 @@ inbox.
 contract/       wire schemas, fixtures, reference logic + shared test vectors
 server/         Node 24 · Hono · SQLite: intake, admin API, worker, Docker
 dashboard/      React admin SPA, served by the server
+cli/            npm snitch-cli: the snitch command and MCP server
 ios/            Swift core (SwiftPM manifest at the repo root: Package.swift)
 android/        Kotlin core + optional system-capture module
 react-native/   npm react-native-snitch: TurboModule + Expo config plugin
@@ -92,7 +97,8 @@ npm run dev -w dashboard
 node scripts/fake-sdk.mjs --key snitch_pk_… --generate-media 5
 ```
 
-`npm test` runs the contract and server tests, and `npm run build` builds the dashboard and the server bundle. The dev
+`npm test` runs the contract, server, dashboard and CLI tests, and `npm run build` builds the dashboard, the server
+bundle and the CLI bundle. The dev
 server serves the API on :8080 (data in `SNITCH_DATA_DIR`, default `./data`), and the dashboard dev server runs on
 :5173, proxied to :8080. `fake-sdk.mjs` sends a report the way a device would.
 
