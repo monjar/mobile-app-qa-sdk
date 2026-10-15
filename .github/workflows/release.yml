@@ -85,8 +85,11 @@ jobs:
       - name: Dry run
         if: github.ref_type != 'tag' && inputs.dry_run != false
         run: |
-          (cd react-native && npm publish --access public --dry-run)
-          (cd cli && npm publish --access public --dry-run)
+          for dir in react-native cli; do
+            name=$(node -p "require('./$dir/package.json').name"); v=$(node -p "require('./$dir/package.json').version")
+            if npm view "$name@$v" version >/dev/null 2>&1; then echo "$name@$v is already on npm; a release would skip it"; continue; fi
+            (cd "$dir" && npm publish --access public --dry-run)
+          done
       - uses: actions/upload-artifact@v6
         with:
           name: react-native-snitch
