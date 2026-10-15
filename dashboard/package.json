@@ -1,7 +1,7 @@
 {
   "name": "snitch-dashboard",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Snitch admin dashboard (served by the Snitch server).",
   "license": "MIT",
   "type": "module",
