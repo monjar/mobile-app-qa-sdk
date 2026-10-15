@@ -118,6 +118,17 @@ jobs:
       - name: Build the example and its tests
         working-directory: android
         run: ./gradlew --no-daemon :example:assembleDebug :example:assembleDebugAndroidTest
+      - name: Download the emulator system image
+        # android-emulator-runner downloads it too, but only once, and a download that arrives
+        # corrupt ("Error on ZipFile unknown archive") fails the job before any test runs.
+        # Installed here with retries, the runner finds it and skips its own download.
+        run: |
+          for attempt in 1 2 3; do
+            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install 'system-images;android-34;google_apis;x86_64' --channel=0 > /dev/null && exit 0
+            echo "::warning::system image download failed (attempt $attempt of 3)"
+            sleep 15
+          done
+          exit 1
       - name: Instrumented tests (API 34 emulator)
         uses: reactivecircus/android-emulator-runner@v2
         with:

@@ -34,21 +34,38 @@ object Touches {
      * [holdMs] (sending MOVE samples every 50 ms, like a real touchscreen), then lifts them.
      */
     fun hold(points: List<Pair<Float, Float>>, landingGapMs: Long = 20, holdMs: Long = 800) {
+        press(points, landingGapMs) { heldMs -> heldMs >= holdMs }
+    }
+
+    /**
+     * Like [hold], but keeps the fingers down until [done] (run on the main thread every 50 ms)
+     * returns true, or for [maxMs] at most. Returns how long they were held.
+     */
+    fun holdUntil(points: List<Pair<Float, Float>>, landingGapMs: Long = 20, maxMs: Long, done: () -> Boolean): Long =
+        press(points, landingGapMs) { heldMs ->
+            var finished = false
+            instrumentation.runOnMainSync { finished = done() }
+            finished || heldMs >= maxMs
+        }
+
+    private fun press(points: List<Pair<Float, Float>>, landingGapMs: Long, lift: (heldMs: Long) -> Boolean): Long {
         val downTime = SystemClock.uptimeMillis()
         for (n in 1..points.size) {
             val action = if (n == 1) MotionEvent.ACTION_DOWN else MotionEvent.ACTION_POINTER_DOWN or ((n - 1) shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)
             inject(downTime, action, points.take(n))
             if (n < points.size) SystemClock.sleep(landingGapMs)
         }
-        val until = SystemClock.uptimeMillis() + holdMs
-        while (SystemClock.uptimeMillis() < until) {
+        val held = SystemClock.uptimeMillis()
+        while (!lift(SystemClock.uptimeMillis() - held)) {
             SystemClock.sleep(50)
             inject(downTime, MotionEvent.ACTION_MOVE, points)
         }
+        val heldMs = SystemClock.uptimeMillis() - held
         for (n in points.size downTo 1) {
             val action = if (n == 1) MotionEvent.ACTION_UP else MotionEvent.ACTION_POINTER_UP or ((n - 1) shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)
             inject(downTime, action, points.take(n))
         }
+        return heldMs
     }
 
     fun tap(point: Pair<Float, Float>, pressMs: Long = 80) {
