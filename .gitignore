@@ -23,3 +23,6 @@ data/
 # test output
 test-results/
 playwright-report/
+
+# deployment config copied from server/fly.toml.example
+/fly.toml
