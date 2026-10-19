@@ -6,6 +6,6 @@
 package io.github.monjar.snitch
 
 internal object SnitchVersion {
-    const val SDK_VERSION = "0.6.0"
+    const val SDK_VERSION = "0.7.0"
     const val SDK_NAME = "snitch-android"
 }
