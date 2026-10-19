@@ -11,7 +11,7 @@ import { SnitchClient, SnitchError } from './client';
 import { Credentials, normalizeServer } from './credentials';
 import { collectEvidence, defaultDir, ticketSummary } from './evidence';
 import { runMcp } from './mcp';
-import { fillTemplate, installSkill, templateText } from './skill';
+import { detectProject, fillTemplate, installSkill, joinSkill, templateFiles } from './skill';
 import { VERSION } from './version';
 
 export const HELP = `snitch ${VERSION}: Snitch QA tickets from the terminal, and an MCP server for coding agents
@@ -35,11 +35,12 @@ Usage
 
   snitch skill install [--dir DIR] [--project slug] [--force]
                                        add the snitch-fix agent skill to a project (.claude/skills/), filled in
-                                       with your server and ticket prefix: reports in, pull requests out
-  snitch skill print                   print it instead, for other agents
+                                       with your server, ticket prefix, branch and checks: reports in, pull
+                                       requests out
+  snitch skill print [--dir DIR]       print it as one file instead, for other agents (AGENTS.md)
 
   snitch mcp [--read-only]             run the MCP server on stdio (for Claude Code, Cursor, …);
-                                       --read-only leaves out the tools that comment and change status
+                                       --read-only leaves out the tools that change tickets
 
 Everywhere: --server URL, or SNITCH_URL. SNITCH_TOKEN skips the stored token (for CI).
 Docs: https://github.com/monjar/mobile-app-qa-sdk/blob/master/docs/cli.md`;
@@ -349,16 +350,19 @@ export async function run(argv: string[], io: Io = processIo): Promise<void> {
           notes.push(`Couldn't read projects from ${server} (${e instanceof Error ? e.message : String(e)}); the ticket prefix is a placeholder.`);
         }
       } else notes.push('Not signed in, so the server and ticket prefix are placeholders. Run `snitch login` first to fill them in.');
-      const text = fillTemplate(templateText(), { server, prefix });
+      const dir = v.dir ?? process.cwd();
+      const values = { server, prefix, ...detectProject(dir) };
+      const files = templateFiles().map((f) => ({ ...f, text: fillTemplate(f.text, values) }));
       if (sub === 'print') {
-        out(text);
+        out(joinSkill(files));
         for (const n of notes) io.err(n);
         return;
       }
-      const path = installSkill(v.dir ?? process.cwd(), text, Boolean(v.force));
-      out(`Wrote ${path}`);
+      const paths = installSkill(dir, files, Boolean(v.force));
+      out(`Wrote ${paths[0]}`);
+      for (const p of paths.slice(1)) out(`  and ${p}`);
       for (const n of notes) out(`  note: ${n}`);
-      out(`Next: fill in the "This project" table in it (checks to run, how to run the app), then ask your agent to "fix the Snitch reports".`);
+      out(`Next: check the "This project" tables in it (how to run the app, other repositories a fix may touch), then ask your agent to "fix the Snitch reports".`);
       out(`For Claude Code, the snitch MCP server makes reports visible as images: claude mcp add snitch -- npx -y snitch-cli mcp`);
       return;
     }

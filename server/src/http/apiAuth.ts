@@ -22,11 +22,17 @@ const ID = '[0-9A-HJKMNP-TV-Z]{26}';
 const TOKEN_ROUTES: readonly [readonly string[], RegExp, ApiTokenScope | null][] = [
   [['GET', 'DELETE'], /^\/token$/, null],
   [['GET'], /^\/projects$/, 'tickets:read'],
+  // Builds and installs, so an agent can tell which build a fix ships in and whether testers have it.
+  [['GET'], new RegExp(`^/projects/${ID}/devices$`), 'tickets:read'],
+  // The team, so a ticket can be assigned by name or email (any member sees it in the dashboard).
+  [['GET'], /^\/users$/, 'tickets:read'],
   [['GET'], /^\/tickets$/, 'tickets:read'],
   [['GET'], new RegExp(`^/tickets/${ID}$`), 'tickets:read'],
   [['GET', 'HEAD'], new RegExp(`^/attachments/${ID}/content$`), 'tickets:read'],
   [['PATCH'], new RegExp(`^/tickets/${ID}$`), 'tickets:write'],
   [['POST'], new RegExp(`^/tickets/${ID}/comments$`), 'tickets:write'],
+  // Open the ticket in one of its project's integrations (a GitHub issue), as the dashboard's button does.
+  [['POST'], new RegExp(`^/tickets/${ID}/escalations$`), 'tickets:write'],
 ];
 
 /** The scope a token needs for this request; null for any token; undefined when tokens can't use it at all. */

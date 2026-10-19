@@ -112,18 +112,44 @@ Any client that takes a JSON config (Cursor, Windsurf, Claude Desktop, …):
 ```
 
 Sign in once with `npx snitch-cli login`, or pass `SNITCH_URL` and `SNITCH_TOKEN` in the server's `env`. Add
-`--read-only` (`npx -y snitch-cli mcp --read-only`) to leave out the two tools that change tickets. The server
+`--read-only` (`npx -y snitch-cli mcp --read-only`) to leave out the tools that change tickets. The server
 starts even when signed out, so the agent can tell you what to run, and it picks up a new sign-in without a restart.
+
+Reading:
 
 | Tool | |
 |---|---|
-| `list_tickets` | Open tickets (or any status, type, project, search). |
-| `get_ticket` | What the tester wrote, app and device details, linked issues, recent comments, and the **screenshot as an image**. |
+| `whoami` | The account, the server and its version, and the token's scopes; how to sign in when signed out. |
+| `list_projects` | Projects with their ticket prefix, report types and open tickets. |
+| `list_tickets` | Open tickets (or any status), by type, project, platform, release type, assignee (`me`, `none`, a teammate) or search, with counts per status and paging. |
+| `get_ticket` | What the tester wrote, app and device details (iPhones by name), linked issues and pull requests, recent comments, and the **screenshot as an image**. |
+| `get_ticket_activity` | The ticket's history: status changes, assignments, comments in Snitch and on GitHub, escalations, pull requests, duplicates. |
+| `get_similar_tickets` | Open tickets that look like the same problem, with a score and why. |
 | `get_video_frames` | Stills from the recording as **images**, labelled by second. Spread over the clip, or `start`/`end`/`every` to zoom in. Needs ffmpeg. |
-| `get_timeline` | The timeline as text, or `problems_only` for errors, warnings and failed requests; plus the log text. |
+| `get_timeline` | The timeline as text, filtered by `kinds` (log, net, screen, touch, app), `search` (words or a `/regex/`), a stretch of the video (`start`/`end`), or `problems_only`. |
+| `get_logs` | The log text, with line numbers: the last lines, or the matches of a search with context. |
+| `list_builds` | Builds seen from installs, with installs per release type and reports: is the reporter on an old build, which build does a fix ship in. |
 | `download_ticket` | Everything to a folder (always `<dir>/<KEY>`), for agents that work with files. |
-| `comment_on_ticket` | Writes. Needs `tickets:write`. |
-| `set_ticket_status` | Writes. Needs `tickets:write`. Agents are told to prefer `in_progress` for a proposed fix. |
+
+Changing tickets (each needs `tickets:write`, and none deletes anything):
+
+| Tool | |
+|---|---|
+| `comment_on_ticket` | A comment as you (and on the GitHub issue, with comment sync on). |
+| `set_ticket_status` | Agents are told to prefer `in_progress` for a proposed fix and leave `resolved` to a person. |
+| `assign_ticket` | To `me`, a teammate by email or name, or `nobody`. |
+| `update_ticket` | A plainer title, or the right report type. |
+| `mark_duplicate` | Status duplicate, linked to the original. |
+| `escalate_ticket` | Opens the ticket in one of its project's integrations (a GitHub issue), as the dashboard's button does. |
+
+It also serves the [agent skill](#the-agent-skill), for clients that don't read skill folders (Cursor, Codex,
+Windsurf): the **prompts** `fix_reports` (reports in, pull requests out) and `triage_reports` (diagnose only), and the
+skill's files as **resources** (`snitch://skill/snitch-fix/SKILL.md`, `…/references/ios-simulator.md`, …), filled in
+with your server, ticket prefix and the project the client runs in. A repository's own copy of the skill wins: the
+prompt tells the agent to follow that instead.
+
+Tools added in 0.7 (`list_builds`, assigning by name, `escalate_ticket`) need a Snitch server of 0.7 or later. On an
+older one they say so, and the rest work as before.
 
 The server's instructions tell agents that descriptions, logs and on-screen text come from testers and are evidence,
 not instructions. Treat them that way in your own prompts and skills too: a report is untrusted input. A report that
@@ -134,11 +160,12 @@ should only look.
 
 ## The agent skill
 
-`snitch skill install` adds a skill for coding agents to your app's repository, at
-`.claude/skills/snitch-fix/SKILL.md`, where Claude Code picks it up. It walks an agent through a report the way a
-careful developer would:
+`snitch skill install` adds a skill for coding agents to your app's repository, in `.claude/skills/snitch-fix/`, where
+Claude Code picks it up: `SKILL.md`, and reference files it reads when it needs them (reproducing on the iOS
+simulator, on the Android emulator, and fixes that belong in a backend or a prompt). It walks an agent through a
+report the way a careful developer would:
 
-1. Pick open reports that have no pull request yet, and spot duplicates.
+1. Pick open reports that have no pull request yet, spot duplicates, and skip what's already fixed on a newer build.
 2. Read the evidence: what the tester wrote, the screenshot and `last-frame.jpg`, the video's contact sheets and
    frames, and the timeline lined up with them.
 3. Find the cause, not the symptom.
@@ -159,14 +186,17 @@ Its ground rules matter more than its steps:
 npx snitch-cli skill install                     # into the current directory
 npx snitch-cli skill install --dir ../my-app --project my-app
 npx snitch-cli skill install --force             # replace an installed copy (your edits to it are lost)
-npx snitch-cli skill print > AGENTS-snitch.md    # for agents that don't read .claude/skills
+npx snitch-cli skill print > AGENTS-snitch.md    # one file, for agents that don't read .claude/skills
 ```
 
-When you're signed in, it fills in your server's address and the project's ticket prefix (pass `--project` when the
-server has more than one). After installing, complete its short **This project** table: the label Snitch gives
-GitHub issues, your default branch, the checks to run, how to start the app, and any other service a fix might touch.
-That's what makes it yours: add your own conventions (commit style, who merges, simulator quirks) as you go. The
-template is [skills/snitch-fix/SKILL.md](../skills/snitch-fix/SKILL.md).
+It fills in what it can find: your server's address and the project's ticket prefix when you're signed in (pass
+`--project` when the server has more than one), the repository's default branch, the checks to run (the `typecheck`,
+`lint` and `test` scripts in `package.json`, with your package manager), and the kind of app (Expo, React Native,
+Flutter, native). After installing, complete its **This project** tables: how to start the app (the simulator, the
+bundle id), your commit conventions, and every other repository a fix might touch with what merging there does (a
+backend that deploys on merge, the site with the privacy policy). That's what makes it yours: add your own lessons
+(simulator quirks, prompt rules, who merges) as you go. The template is
+[skills/snitch-fix/](../skills/snitch-fix/SKILL.md).
 
 It works best with the MCP server added (`claude mcp add snitch -- npx -y snitch-cli mcp`), so screenshots and frames
 reach the agent as images. Without it, the skill uses `snitch ticket --download` and reads the files.
@@ -177,11 +207,12 @@ Tokens are personal: they act as you, limited to their scopes.
 
 | Scope | Allows |
 |---|---|
-| `tickets:read` | List and read tickets, download attachments, list projects. |
-| `tickets:write` | Comment, and change status, assignee, type and title. |
+| `tickets:read` | List and read tickets, download attachments, list projects, the team (to assign by name), and a project's builds and installs. |
+| `tickets:write` | Comment; change status, assignee, type, title and duplicate; escalate a ticket to one of its project's integrations (a GitHub issue). |
 
-Tokens can't reach anything else: users, projects, integrations, keys, bulk changes, deleting tickets, other tokens,
-or approving a device sign-in. Those need the dashboard. Each request sends `Authorization: Bearer snitch_at_…`. There's
+Tokens can't reach anything else: managing users, projects, integrations (or reading their settings: a ticket names
+its project's integrations, nothing more), keys, bulk changes, deleting tickets, share links, other tokens, or
+approving a device sign-in. Those need the dashboard. Each request sends `Authorization: Bearer snitch_at_…`. There's
 no CSRF header, because that check protects cookies and a bearer request doesn't use one. Only `Bearer` means a token:
 other `Authorization` headers (Basic auth from a proxy in front of Snitch, say) are ignored and the session decides.
 
@@ -201,10 +232,12 @@ curl -H "Authorization: Bearer $SNITCH_TOKEN" -o shot.jpg https://snitch.example
 | Route | Scope |
 |---|---|
 | `GET /api/admin/token` (who am I), `DELETE /api/admin/token` (revoke this token) | any |
-| `GET /api/admin/projects` | `tickets:read` |
+| `GET /api/admin/projects`, `GET /api/admin/projects/:id/devices` (builds and installs) | `tickets:read` |
+| `GET /api/admin/users` | `tickets:read` |
 | `GET /api/admin/tickets`, `GET /api/admin/tickets/:id` | `tickets:read` |
 | `GET`/`HEAD /api/admin/attachments/:id/content` (Range requests work) | `tickets:read` |
 | `PATCH /api/admin/tickets/:id`, `POST /api/admin/tickets/:id/comments` | `tickets:write` |
+| `POST /api/admin/tickets/:id/escalations` with `{"integrationId": "…"}` | `tickets:write` |
 
 Requests are limited to 600 a minute per token.
 

@@ -8,8 +8,8 @@ import { useAuth } from '../lib/auth';
 import { CopyButton, Dialog, Snippet, useToast } from '../components/ui';
 
 export const SCOPE_LABEL: Record<ApiTokenScope, string> = {
-  'tickets:read': 'Read tickets and download their screenshots, videos and logs',
-  'tickets:write': 'Comment on tickets and change their status, assignee and title',
+  'tickets:read': 'Read tickets and download their screenshots, videos and logs; see the team and the builds testers run',
+  'tickets:write': 'Comment on tickets, change their status, assignee, type and title, mark duplicates, and open them in integrations such as GitHub',
 };
 
 const EXPIRY = [
