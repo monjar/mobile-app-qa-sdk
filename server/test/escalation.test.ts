@@ -188,13 +188,49 @@ describe('routing and escalation', () => {
     const h = await harness();
     const s = await login(h);
     const gh = await addIntegration(h, s, github);
-    h.onFetch(() => Response.json({ full_name: 'monjar/mochiro', has_issues: true }));
+    let canWrite = true;
+    let probe: RequestInit | undefined;
+    h.onFetch((url, init) => {
+      if (url.endsWith('/issues')) {
+        probe = init;
+        return canWrite ? Response.json({ message: 'Validation Failed' }, { status: 422 }) : Response.json({ message: 'Not Found' }, { status: 404 });
+      }
+      return Response.json({ full_name: 'monjar/mochiro', has_issues: true });
+    });
     const ok = await adminFetch(h, s, `/integrations/${gh}/test`, { method: 'POST' });
-    expect(await ok.json() as any).toEqual({ ok: true, message: 'Token can reach monjar/mochiro' });
+    expect(await ok.json() as any).toEqual({ ok: true, message: 'Token can create issues in monjar/mochiro' });
+    // The probe has no title, so it can never create an issue.
+    expect(probe).toMatchObject({ method: 'POST', body: '{}' });
+
+    // Metadata alone sees the repo but can't create issues: the test must say so.
+    canWrite = false;
+    const readOnly = await adminFetch(h, s, `/integrations/${gh}/test`, { method: 'POST' });
+    expect(readOnly.status).toBe(422);
+    expect((await readOnly.json() as any).error.message).toContain('"Issues: Read and write"');
+
     h.onFetch(() => new Response('Not Found', { status: 404 }));
     const bad = await adminFetch(h, s, `/integrations/${gh}/test`, { method: 'POST' });
     expect(bad.status).toBe(422);
-    expect((await bad.json() as any).error.message).toContain('404');
+    expect((await bad.json() as any).error.message).toContain("can't create issues in monjar/mochiro (GitHub answered 404)");
+  });
+
+  it('explains a 404 from GitHub as a token problem, without retrying', async () => {
+    const h = await harness();
+    const s = await login(h);
+    const gh = await addIntegration(h, s, github);
+    let posts = 0;
+    h.onFetch((url) => {
+      if (url.includes('/search/issues')) return Response.json({ items: [] });
+      posts++;
+      return Response.json({ message: 'Not Found', documentation_url: 'https://docs.github.com/rest/issues/issues#create-an-issue' }, { status: 404 });
+    });
+    const id = await sendReport(h);
+    await adminFetch(h, s, `/tickets/${id}/escalations`, { method: 'POST', body: { integrationId: gh } });
+    await drain(h.deps);
+    const d = (await (await adminFetch(h, s, `/tickets/${id}`)).json() as any) as TicketDetail;
+    expect(d.escalations[0]!.state).toBe('failed');
+    expect(d.escalations[0]!.lastError).toContain("can't create issues in monjar/mochiro");
+    expect(posts).toBe(1);
   });
 
   it('never returns integration secrets', async () => {

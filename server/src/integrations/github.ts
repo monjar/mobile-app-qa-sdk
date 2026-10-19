@@ -99,12 +99,26 @@ export async function sendGithub(deps: Deps, integration: IntegrationRow, ticket
         signal: AbortSignal.timeout(20_000),
       });
       const retryText = await retry.text();
-      if (!retry.ok) throw classifyHttp(retry, 'GitHub create issue', retryText);
+      if (!retry.ok) throw issueRefusal(cfg, retry, retryText);
       return parseIssue(retryText);
     }
-    throw classifyHttp(res, 'GitHub create issue', text);
+    throw issueRefusal(cfg, res, text);
   }
   return parseIssue(text);
+}
+
+/**
+ * GitHub answers 404, not 403, when a token can't reach a repository, so a
+ * bare "HTTP 404 Not Found" sends people looking for a missing repo instead
+ * of at the token. Says what to fix.
+ */
+function issueRefusal(cfg: GithubConfig, res: Response, text: string): SendError {
+  const err = classifyHttp(res, 'GitHub create issue', text);
+  if (res.status !== 403 && res.status !== 404) return err;
+  return new SendError(
+    `The token can't create issues in ${cfg.owner}/${cfg.repo} (GitHub answered ${res.status}). Check that the repository exists, that it is among the token's selected repositories (resource owner ${cfg.owner}), and that the token has "Issues: Read and write".`,
+    false,
+  );
 }
 
 function parseIssue(text: string): SendResult {
@@ -126,18 +140,33 @@ async function findExisting(deps: Deps, api: string, owner: string, repo: string
   }
 }
 
-/** Checks the token can see the repo; used by the dashboard's "Send test". */
+/**
+ * Checks the token can create issues in the repo; used by the dashboard's "Send test".
+ * Seeing the repo only needs Metadata, so it also posts an issue without a title:
+ * GitHub checks access before the body, so 422 means the token could create one.
+ */
 export async function testGithub(deps: Deps, integration: IntegrationRow): Promise<string> {
   const cfg = GithubConfig.parse(JSON.parse(integration.config_json));
   const token = deps.integrations.secret(integration);
   if (!token) throw new SendError('No token configured', false);
-  const res = await deps.fetch(`${githubApiBase(cfg)}${githubRepoPath(cfg)}`, {
+  const repoUrl = `${githubApiBase(cfg)}${githubRepoPath(cfg)}`;
+  const res = await deps.fetch(repoUrl, {
     headers: githubHeaders(token),
     signal: AbortSignal.timeout(10_000),
   });
   const text = await res.text();
-  if (!res.ok) throw classifyHttp(res, 'GitHub repository check', text);
+  if (!res.ok) throw res.status === 404 ? issueRefusal(cfg, res, text) : classifyHttp(res, 'GitHub repository check', text);
   const repo = JSON.parse(text) as { full_name?: string; has_issues?: boolean };
-  if (repo.has_issues === false) throw new SendError(`${repo.full_name} has issues disabled`, false);
-  return `Token can reach ${repo.full_name ?? `${cfg.owner}/${cfg.repo}`}`;
+  const name = repo.full_name ?? `${cfg.owner}/${cfg.repo}`;
+  if (repo.has_issues === false) throw new SendError(`${name} has issues disabled`, false);
+
+  const probe = await deps.fetch(`${repoUrl}/issues`, {
+    method: 'POST',
+    headers: githubHeaders(token),
+    body: '{}',
+    signal: AbortSignal.timeout(10_000),
+  });
+  const probeText = await probe.text();
+  if (probe.status !== 422) throw probe.ok ? new SendError(`GitHub accepted an issue without a title in ${name}`, false) : issueRefusal(cfg, probe, probeText);
+  return `Token can create issues in ${name}`;
 }
