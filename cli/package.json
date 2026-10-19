@@ -1,6 +1,6 @@
 {
   "name": "snitch-cli",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Snitch from the terminal and from coding agents: read QA tickets with their screenshots, video frames, timelines and logs, comment and change status. Includes an MCP server.",
   "license": "MIT",
   "type": "module",
