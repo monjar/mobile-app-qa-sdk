@@ -256,10 +256,13 @@ export type DeviceListQuery = z.infer<typeof DeviceListQuery>;
  * `Authorization: Bearer snitch_at_…` instead of the session cookie (no CSRF
  * header: that guards cookies, which a bearer request doesn't carry).
  *
- * - tickets:read   list and read tickets, download attachments, list projects
- * - tickets:write  comment on tickets and change status, assignee, type, title
+ * - tickets:read   list and read tickets, download attachments, list projects,
+ *                  the team (to assign by name) and a project's builds and installs
+ * - tickets:write  comment on tickets; change status, assignee, type, title and
+ *                  duplicate; escalate a ticket to one of its project's integrations
  *
- * Tokens can't manage tokens, users, projects or integrations, and can't
+ * Tokens can't manage tokens, users, projects or integrations (nor read their
+ * settings), act on many tickets at once, delete tickets, make share links, or
  * approve a device sign-in: those stay with a signed-in browser.
  */
 export const API_TOKEN_PREFIX = 'snitch_at_';
@@ -521,7 +524,14 @@ export interface TicketDetail {
     custom: Record<string, string>;
     stats: CaptureStats;
   };
-  project: { id: string; slug: string; name: string; reportTypes: ReportTypeOption[] };
+  project: {
+    id: string;
+    slug: string;
+    name: string;
+    reportTypes: ReportTypeOption[];
+    /** The integrations this ticket could be escalated to: names only, never their settings. */
+    integrations: { id: string; kind: IntegrationKind; name: string; enabled: boolean }[];
+  };
   attachments: AttachmentView[];
   events: TicketEventView[];
   escalations: EscalationView[];

@@ -89,7 +89,7 @@ describe('api tokens', () => {
     const refused: [string, string, unknown?][] = [
       ['GET', '/tokens'],
       ['POST', '/tokens', { name: 'more', scopes: ['tickets:read'] }],
-      ['GET', '/users'],
+      ['POST', '/users', { email: 'x@example.com', role: 'member' }],
       ['GET', '/audit'],
       ['GET', '/server'],
       ['POST', '/projects', { name: 'X', slug: 'x', ticketPrefix: 'X' }],
@@ -97,7 +97,9 @@ describe('api tokens', () => {
       ['GET', `/projects/${h.projectId}/keys`],
       ['POST', '/tickets/bulk', { ids: [ticketId], action: 'status', status: 'resolved' }],
       ['DELETE', `/tickets/${ticketId}`],
-      ['POST', `/tickets/${ticketId}/escalations`, { integrationId: 'x' }],
+      ['POST', `/attachments/${ticketId}/share-links`, {}],
+      ['GET', `/projects/${h.projectId}`],
+      ['GET', `/projects/${h.projectId}/sdk-config`],
       ['GET', '/device/BCDF-GHJK'],
       ['POST', '/device/BCDF-GHJK/approve'],
     ];
@@ -108,6 +110,40 @@ describe('api tokens', () => {
     expect(tokenScopeFor('GET', '/api/admin/tickets/bulk')).toBeUndefined();
     expect(tokenScopeFor('GET', '/api/admin/tickets/export')).toBeUndefined();
     expect(tokenScopeFor('HEAD', `/api/admin/attachments/${ticketId}/content`)).toBe('tickets:read');
+    expect(tokenScopeFor('GET', '/api/admin/projects/not-an-id/devices')).toBeUndefined();
+  });
+
+  it('agents can see builds and the team, assign, mark duplicates and escalate, but not read integration settings', async () => {
+    const h = await harness();
+    const s = await login(h);
+    const gh = (await (await adminFetch(h, s, `/projects/${h.projectId}/integrations`, {
+      method: 'POST',
+      body: { kind: 'github', name: 'GitHub', config: { owner: 'monjar', repo: 'app' }, secret: 'ghp_secret_value' },
+    })).json()) as any;
+    const first = await sendReport(h);
+    const second = await sendReport(h);
+    const read = (await makeToken(h, s, { scopes: ['tickets:read'] })).token;
+    const write = (await makeToken(h, s, { name: 'agent' })).token;
+
+    const devices = await bearer(h, read, `/projects/${h.projectId}/devices`);
+    expect(devices.status).toBe(200);
+    expect(((await devices.json()) as any).builds).toBeInstanceOf(Array);
+    const users = (await (await bearer(h, read, '/users')).json()) as any[];
+    expect(users.map((u) => u.email)).toEqual(['admin@example.com']);
+
+    // Ticket detail names the project's integrations, and nothing of their settings.
+    const raw = await (await bearer(h, read, `/tickets/${first}`)).text();
+    expect((JSON.parse(raw) as TicketDetail).project.integrations).toEqual([{ id: gh.id, kind: 'github', name: 'GitHub', enabled: true }]);
+    expect(raw).not.toContain('ghp_secret_value');
+    expect(raw).not.toContain('monjar/app');
+
+    expect((await bearer(h, read, `/tickets/${first}/escalations`, { method: 'POST', body: { integrationId: gh.id } })).status).toBe(403);
+    expect((await bearer(h, write, `/tickets/${first}/escalations`, { method: 'POST', body: { integrationId: gh.id } })).status).toBe(202);
+    expect(h.deps.integrations.escalationViews(first)[0]).toMatchObject({ integrationId: gh.id, state: 'queued' });
+
+    const patched = await bearer(h, write, `/tickets/${second}`, { method: 'PATCH', body: { assigneeUserId: users[0].id, duplicateOfId: first } });
+    expect(patched.status).toBe(200);
+    expect(h.deps.tickets.get(second)).toMatchObject({ assignee_user_id: users[0].id, duplicate_of_id: first, status: 'duplicate' });
   });
 
   it('refuses malformed, unknown, revoked and expired tokens, and disabled users', async () => {
