@@ -5,12 +5,15 @@
 import type {
   ApiTokenScope,
   DeviceCodeIssued,
+  DeviceList,
+  DeviceListQuery,
   DeviceTokenResult,
   ProjectView,
   TicketDetail,
   TicketList,
   TicketListQuery,
   TicketPatch,
+  UserView,
   WhoAmI,
 } from '@snitch/contract';
 import { VERSION } from './version';
@@ -68,6 +71,10 @@ export class SnitchClient {
       }
       const message = err.message ?? `${method} ${path} failed (${res.status})`;
       if (res.status === 401 && auth) throw new SnitchError(401, 'unauthorized', `${message}. Sign in again with \`snitch login --server ${this.server}\`.`);
+      // Routes opened to tokens after 0.6 (builds, the team, escalation) answer this on older servers.
+      if (res.status === 403 && /can.t use this endpoint/.test(message)) {
+        throw new SnitchError(403, err.code ?? 'forbidden', `${message}. If this works in the dashboard, ${this.server} may be older than this snitch-cli: update the server.`);
+      }
       throw new SnitchError(res.status, err.code ?? 'http', message);
     }
     return res;
@@ -97,6 +104,18 @@ export class SnitchClient {
     return this.json('GET', `/api/admin/tickets${qs ? `?${qs}` : ''}`);
   }
 
+  /** Installs and the builds they run, from the SDK's check-ins. */
+  devices(projectId: string, q: DeviceListQuery = {}): Promise<DeviceList> {
+    const params = new URLSearchParams();
+    for (const [k, v] of Object.entries(q)) if (v !== undefined) params.set(k, String(v));
+    const qs = params.toString();
+    return this.json('GET', `/api/admin/projects/${projectId}/devices${qs ? `?${qs}` : ''}`);
+  }
+
+  users(): Promise<UserView[]> {
+    return this.json('GET', '/api/admin/users');
+  }
+
   /** A ticket by id, key (APP-12) or dashboard link. */
   async ticket(ref: string): Promise<TicketDetail> {
     const parsed = parseTicketRef(ref);
@@ -118,6 +137,11 @@ export class SnitchClient {
 
   comment(id: string, body: string): Promise<unknown> {
     return this.json('POST', `/api/admin/tickets/${id}/comments`, { body });
+  }
+
+  /** Opens the ticket in an integration (a GitHub issue); the server sends it in the background. */
+  escalate(id: string, integrationId: string): Promise<TicketDetail> {
+    return this.json('POST', `/api/admin/tickets/${id}/escalations`, { integrationId });
   }
 
   async startDevice(req: { clientName: string; scopes: ApiTokenScope[]; expiresInDays?: number | null }): Promise<DeviceCodeIssued> {

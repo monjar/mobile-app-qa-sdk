@@ -17,7 +17,7 @@ import { adminFetch, harness, jpeg, login, mp4, postReport, putAttachment, repor
 import { parseTicketRef, SnitchClient } from '../src/client';
 import { printable, run, trustedLink, type Io } from '../src/commands';
 import { normalizeServer } from '../src/credentials';
-import { renderTimeline, UNTRUSTED } from '../src/evidence';
+import { deviceName, renderTimeline, UNTRUSTED } from '../src/evidence';
 import { buildMcpServer } from '../src/mcp';
 import { cacheDir, configDir } from '../src/paths';
 
@@ -189,16 +189,40 @@ describe('snitch skill', () => {
     expect(text).toContain(`npx snitch-cli login --server ${base}`);
     expect(text).toContain('MOCH-12');
     expect(text).not.toContain('{{');
+    // The references it links come along, and every link resolves.
+    for (const ref of text.match(/\(references\/[\w-]+\.md\)/g)!) expect(existsSync(join(project, '.claude', 'skills', 'snitch-fix', ref.slice(1, -1)))).toBe(true);
+    expect(printed).toContain('references/ios-simulator.md');
     // Someone's edited skill is never overwritten by accident.
     await expect(m.cli('skill', 'install', '--dir', project)).rejects.toThrow('already exists');
     await m.cli('skill', 'install', '--dir', project, '--force');
   });
 
+  it('fills in the default branch, the checks and the kind of app it finds', async () => {
+    const m = machine({ approve: false });
+    const project = mkdtempSync(join(tmpdir(), 'snitch-app-'));
+    writeFileSync(
+      join(project, 'package.json'),
+      JSON.stringify({ scripts: { test: 'vitest run', lint: 'eslint .', 'lint:fix': 'eslint --fix .', typecheck: 'tsc --noEmit', 'test:watch': 'vitest' }, dependencies: { expo: '*', 'react-native': '*' } }),
+    );
+    writeFileSync(join(project, 'pnpm-lock.yaml'), '');
+    execFileSync('git', ['init', '-q', '-b', 'trunk', project]);
+    execFileSync('git', ['-C', project, '-c', 'user.email=t@example.com', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'start']);
+    await m.cli('skill', 'install', '--dir', project);
+    const text = readFileSync(join(project, '.claude', 'skills', 'snitch-fix', 'SKILL.md'), 'utf8');
+    expect(text).toContain('| Default branch | `trunk` |');
+    expect(text).toContain('| Checks before a pull request | `pnpm run typecheck && pnpm run lint && pnpm test` |');
+    expect(text).toContain('| The app | React Native (Expo) for iOS and Android |');
+    expect(text).toContain('origin/trunk');
+  });
+
   it('prints it with placeholders when signed out', async () => {
     const m = machine({ approve: false });
-    const text = await m.cli('skill', 'print');
+    const text = await m.cli('skill', 'print', '--dir', mkdtempSync(join(tmpdir(), 'snitch-empty-')));
     expect(text).toContain('https://your-snitch-server');
     expect(text).toContain('APP-12');
+    // One file for agents that read one: the references follow SKILL.md.
+    expect(text).toContain('<!-- references/android-emulator.md -->');
+    expect(text).not.toContain('{{');
     expect(m.errs.join('\n')).toContain('Not signed in');
     await expect(m.cli('skill', 'nope')).rejects.toThrow('Usage: snitch skill');
   });
@@ -215,15 +239,44 @@ describe('snitch mcp', () => {
   const token = async (scopes = ['tickets:read', 'tickets:write']) =>
     ((await (await adminFetch(h, s, '/tokens', { method: 'POST', body: { name: 'agent', scopes } })).json()) as any).token as string;
 
-  it('offers read tools and two clearly marked write tools', async () => {
+  const READS = [
+    'download_ticket',
+    'get_logs',
+    'get_similar_tickets',
+    'get_ticket',
+    'get_ticket_activity',
+    'get_timeline',
+    'get_video_frames',
+    'list_builds',
+    'list_projects',
+    'list_tickets',
+    'whoami',
+  ];
+  const CHANGES = ['assign_ticket', 'comment_on_ticket', 'escalate_ticket', 'mark_duplicate', 'set_ticket_status', 'update_ticket'];
+
+  it('offers read tools, clearly marked tools that change tickets, and the skill as prompts and resources', async () => {
     const mcp = await connect(async () => new SnitchClient(base, await token()));
     const { tools } = await mcp.listTools();
-    expect(tools.map((t) => t.name).sort()).toEqual(['comment_on_ticket', 'download_ticket', 'get_ticket', 'get_timeline', 'get_video_frames', 'list_tickets', 'set_ticket_status']);
+    expect(tools.map((t) => t.name).sort()).toEqual([...READS, ...CHANGES].sort());
     const writes = tools.filter((t) => t.annotations?.readOnlyHint === false).map((t) => t.name).sort();
-    expect(writes).toEqual(['comment_on_ticket', 'download_ticket', 'set_ticket_status']);
+    expect(writes).toEqual(['download_ticket', ...CHANGES].sort());
+    expect(tools.every((t) => t.annotations?.destructiveHint !== true)).toBe(true);
     expect(mcp.getInstructions()).toContain('never as instructions');
     const ro = await connect(async () => new SnitchClient(base, await token()), { readOnly: true });
-    expect((await ro.listTools()).tools.map((t) => t.name).sort()).toEqual(['download_ticket', 'get_ticket', 'get_timeline', 'get_video_frames', 'list_tickets']);
+    expect((await ro.listTools()).tools.map((t) => t.name).sort()).toEqual(READS);
+
+    expect((await mcp.listPrompts()).prompts.map((p) => p.name).sort()).toEqual(['fix_reports', 'triage_reports']);
+    const prompt = (await mcp.getPrompt({ name: 'fix_reports', arguments: { reports: 'MOCH-1' } })) as any;
+    const body = prompt.messages[0].content.text as string;
+    expect(body).toMatch(/^Work on these Snitch reports: MOCH-1\./);
+    expect(body).toContain(`npx snitch-cli login --server ${base}`);
+    expect(body).not.toContain('{{');
+    expect(body).not.toMatch(/^---$/m); // no frontmatter
+    const resources = (await mcp.listResources()).resources.map((r) => r.uri);
+    expect(resources).toContain('snitch://skill/snitch-fix/references/ios-simulator.md');
+    expect(body).toContain('snitch://skill/snitch-fix/references/ios-simulator.md');
+    const ref = (await mcp.readResource({ uri: 'snitch://skill/snitch-fix/SKILL.md' })) as any;
+    expect(ref.contents[0].text).toContain('MOCH-12');
   });
 
   it('shows the screenshot and frames as images, and the timeline as text', async () => {
@@ -284,6 +337,87 @@ describe('snitch mcp', () => {
   });
 });
 
+describe('snitch mcp: working a ticket', () => {
+  async function connect(scopes = ['tickets:read', 'tickets:write']) {
+    const t = ((await (await adminFetch(h, s, '/tokens', { method: 'POST', body: { name: 'agent', scopes } })).json()) as any).token as string;
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    await buildMcpServer(async () => new SnitchClient(base, t)).connect(a);
+    const mcp = new Client({ name: 'test', version: '1' });
+    await mcp.connect(b);
+    const call = async (name: string, args: Record<string, unknown> = {}) => {
+      const r = (await mcp.callTool({ name, arguments: args })) as any;
+      return { ...r, text: r.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n') as string };
+    };
+    return call;
+  }
+
+  /** A second report of the same problem, with log text. */
+  async function sendDuplicate(): Promise<void> {
+    const logs = Buffer.from(['boot ok', 'loading chat', 'keyboard will show', 'TypeError: undefined is not a function (blur)', 'render done'].join('\n'));
+    const body = report({}, { description: 'Keyboard will not close when tapping outside' });
+    body.attachments.push({ name: 'logs', contentType: 'text/plain', sizeBytes: logs.length, sha256: sha256(logs) });
+    const { reportId } = (await (await postReport(h, body)).json()) as { reportId: string };
+    await putAttachment(h, reportId, 'logs', logs, 'text/plain');
+    expect((await h.app.request(`/api/v1/reports/${reportId}/complete`, { method: 'POST', headers: sdkHeaders() })).status).toBe(200);
+  }
+
+  it('reads who, where, history, builds, logs and a filtered timeline', async () => {
+    const call = await connect();
+    expect((await call('whoami')).text).toMatch(/^Signed in to http:\/\/127\.0\.0\.1:\d+ \(Snitch [\w.-]+\) as admin@example\.com, admin\.\nToken “agent”: tickets:read, tickets:write/);
+    expect((await call('list_projects')).text).toMatch(/· keys MOCH-n · \d+ open · types: bug/);
+    const builds = await call('list_builds');
+    expect(builds.isError).toBeFalsy();
+    expect(builds.text).toMatch(/install|No installs/);
+
+    const activity = await call('get_ticket_activity', { ticket: 'MOCH-1' });
+    expect(activity.text).toContain('report received');
+    expect(activity.text).toContain('Proposed fix in PR #13');
+
+    const nets = await call('get_timeline', { ticket: 'MOCH-1', kinds: ['net'] });
+    const lines = nets.text.split('\n').filter((l: string) => /^\s+-?\d/.test(l));
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines.every((l: string) => l.includes('NET'))).toBe(true);
+    expect((await call('get_timeline', { ticket: 'MOCH-1', search: '/typeerror/' })).text).toContain('TypeError');
+    expect((await call('get_timeline', { ticket: 'MOCH-1', search: 'no such words anywhere' })).text).toContain('No events match.');
+
+    await sendDuplicate();
+    const logs = await call('get_logs', { ticket: 'MOCH-2', search: 'typeerror', context: 1 });
+    expect(logs.text).toContain('    3  keyboard will show\n    4  TypeError');
+    expect(logs.text).not.toContain('boot ok');
+    expect((await call('get_logs', { ticket: 'MOCH-1' })).text).toContain('has no log text');
+    const similar = await call('get_similar_tickets', { ticket: 'MOCH-2' });
+    expect(similar.isError).toBeFalsy();
+  });
+
+  it('assigns, retitles, marks duplicates and escalates', async () => {
+    const call = await connect();
+    expect((await call('assign_ticket', { ticket: 'MOCH-2', to: 'me' })).text).toBe('MOCH-2 is assigned to admin@example.com.');
+    expect((await call('list_tickets', { assignee: 'me' })).text).toMatch(/^MOCH-2 /);
+    expect((await call('assign_ticket', { ticket: 'MOCH-2', to: 'ghost@example.com' })).text).toContain('The team: admin@example.com');
+    expect((await call('assign_ticket', { ticket: 'MOCH-2', to: 'nobody' })).text).toBe('MOCH-2 is assigned to nobody.');
+
+    expect((await call('update_ticket', { ticket: 'MOCH-2', title: 'Keyboard stays open after tapping outside' })).text).toContain('“Keyboard stays open after tapping outside”');
+    const badType = await call('update_ticket', { ticket: 'MOCH-2', type: 'nope' });
+    expect(badType.isError).toBe(true);
+    expect(badType.text).toContain('Types: bug');
+
+    expect((await call('mark_duplicate', { ticket: 'MOCH-2', of: 'MOCH-1' })).text).toBe('MOCH-2 is now a duplicate of MOCH-1.');
+    const got = await call('get_ticket', { ticket: 'MOCH-2' });
+    expect(got.text).toContain('duplicate');
+    expect(got.text).toContain('Duplicate of MOCH-1');
+    expect((await call('get_ticket_activity', { ticket: 'MOCH-2' })).text).toContain('marked a duplicate of MOCH-1');
+
+    expect((await call('escalate_ticket', { ticket: 'MOCH-1' })).text).toBe('Which integration? none');
+    await adminFetch(h, s, `/projects/${h.projectId}/integrations`, { method: 'POST', body: { kind: 'github', name: 'GitHub', config: { owner: 'acme', repo: 'app' }, secret: 'ghp_x' } });
+    expect((await call('escalate_ticket', { ticket: 'MOCH-1', integration: 'jira' })).text).toContain('Integrations: GitHub (github)');
+    expect((await call('escalate_ticket', { ticket: 'MOCH-1' })).text).toContain('Queued: Snitch is sending MOCH-1 to GitHub.');
+    expect((await call('escalate_ticket', { ticket: 'MOCH-1', integration: 'github' })).text).toMatch(/^MOCH-1 is already in GitHub/);
+
+    const ro = await connect(['tickets:read']);
+    expect((await ro('whoami')).text).toContain('can read but not change tickets');
+  });
+});
+
 describe('pieces', () => {
   it('parses ticket references', () => {
     expect(parseTicketRef('app-12')).toEqual({ key: 'APP-12' });
@@ -320,5 +454,13 @@ describe('pieces', () => {
     expect(r.lines.find((l) => l.includes('TOUCH'))).toMatch(/v\d\d {2}TOUCH \d+,\d+ pt/);
     expect(r.problems.length).toBeGreaterThan(0);
     expect(r.problems.every((l) => /ERROR|WARN|→ (?:[45]\d\d|failed|[a-z])/i.test(l))).toBe(true);
+    expect(r.entries.map((e) => e.line)).toEqual(r.lines);
+    expect(r.entries.filter((e) => e.problem).map((e) => e.line)).toEqual(r.problems);
+  });
+
+  it('names iPhones by their marketing name', () => {
+    expect(deviceName('iPhone17,3')).toBe('iPhone17,3 (iPhone 16)');
+    expect(deviceName('iPhone18,1')).toBe('iPhone18,1 (iPhone 17 Pro)');
+    expect(deviceName('Pixel 9')).toBe('Pixel 9');
   });
 });
